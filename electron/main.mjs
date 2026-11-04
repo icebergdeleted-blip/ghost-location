@@ -9,6 +9,9 @@ import { IosAdapter } from '../backend/ios.mjs';
 import { AndroidAdapter } from '../backend/android.mjs';
 import { run } from '../backend/process.mjs';
 import { wifiStatus } from '../backend/network.mjs';
+import { RouteJournal } from '../backend/route-journal.mjs';
+import { WakeLock } from '../backend/power.mjs';
+import { TileSource } from '../backend/tiles.mjs';
 
 const rootPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const devUrl = !app.isPackaged && process.env.GHOST_DEV_URL === 'http://127.0.0.1:5173' ? process.env.GHOST_DEV_URL : null;
@@ -16,8 +19,18 @@ if (!app.isPackaged) app.setPath('userData', process.env.GHOST_TEST_DATA || path
 app.setName('Ghost');
 protocol.registerSchemesAsPrivileged([{ scheme: 'ghost', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 
-let window, controller, poll, wakeLock, quitting = false, quitPending = false;
+let window, controller, poll, quitting = false, quitPending = false;
 const geocoder = new Geocoder();
+const wakeLock = new WakeLock(powerSaveBlocker);
+const tileSource = new TileSource();
+let tileError = null, markTilesReady;
+// The renderer may ask before startup has read the saved tile preference.
+const tilesReady = new Promise(resolve => { markTilesReady = resolve; });
+async function applyTileSource(preferences) {
+  try { await tileSource.configure(preferences.tileSource || 'online', preferences.tilePath); tileError = null; }
+  catch (error) { tileError = error.message; await tileSource.configure('online'); }
+  finally { markTilesReady(); }
+}
 const allowedExternal = new Set(['github.com', 'developer.android.com', 'developer.apple.com', 'support.apple.com', 'www.openstreetmap.org', 'openstreetmap.org', 'photon.komoot.io', 'doronz88.github.io']);
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
@@ -30,13 +43,20 @@ async function boot() {
   protocol.handle('ghost', request => {
     const url = new URL(request.url);
     if (url.hostname !== 'app') return new Response('Not found', { status: 404 });
+    const tile = url.pathname.match(/^\/tiles\/(\d+)\/(\d+)\/(\d+)$/);
+    if (tile) {
+      // Offline map tiles come from the user-selected local file or folder only.
+      return tileSource.tile(tile[1], tile[2], tile[3])
+        .then(found => found ? new Response(found.body, { headers: { 'Content-Type': found.contentType, 'Cache-Control': 'no-store' } }) : new Response('Not found', { status: 404 }))
+        .catch(() => new Response('Tile error', { status: 500 }));
+    }
     let pathname;
     try { pathname = decodeURIComponent(url.pathname); } catch { return new Response('Bad request', { status: 400 }); }
     const target = path.resolve(dist, `.${pathname === '/' ? '/index.html' : pathname}`);
     if (!target.startsWith(`${dist}${path.sep}`)) return new Response('Not found', { status: 404 });
     return net.fetch(pathToFileURL(target).toString());
   });
-  const csp = `default-src 'self'; script-src 'self'${devUrl ? " 'unsafe-inline'" : ''}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.openstreetmap.org; connect-src 'self'${devUrl ? ' ws://127.0.0.1:5173' : ''}; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'`;
+  const csp = `default-src 'self'; script-src 'self'${devUrl ? " 'unsafe-inline'" : ''}; style-src 'self' 'unsafe-inline'; img-src 'self' ghost://app data: blob: https://tile.openstreetmap.org https://*.tile.openstreetmap.org; connect-src 'self'${devUrl ? ' ws://127.0.0.1:5173' : ''}; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'`;
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [csp] } });
   });
@@ -46,11 +66,10 @@ async function boot() {
   const callbacks = { onSessionEnd: event => controller?.sessionEnded(event), onLocationRefresh: event => controller?.locationRefreshed(event) };
   const ios = new IosAdapter({ ...options, ...callbacks });
   const android = new AndroidAdapter({ ...options, ...callbacks });
-  controller = new Controller({ adapters: { ios, android }, network: wifiStatus, store: new Store(path.join(app.getPath('userData'), 'settings.json')) });
+  controller = new Controller({ adapters: { ios, android }, network: wifiStatus, store: new Store(path.join(app.getPath('userData'), 'settings.json')),
+    routeJournal: new RouteJournal(path.join(app.getPath('userData'), 'route.json')) });
   controller.on('state', state => {
-    const active = state.session && ['active', 'applying', 'reconnecting'].includes(state.session.status);
-    if (active && wakeLock == null) wakeLock = powerSaveBlocker.start('prevent-app-suspension');
-    if (!active && wakeLock != null) { powerSaveBlocker.stop(wakeLock); wakeLock = null; }
+    wakeLock.update(state); // released as soon as Restore removes the session
     if (window && !window.isDestroyed()) window.webContents.send('ghost:state', state);
   });
 
@@ -72,6 +91,21 @@ async function boot() {
     savePlace: value => controller.savePlace(value),
     deletePlace: id => controller.deletePlace(id),
     updatePreferences: value => controller.updatePreferences(value),
+    getTileInfo: async () => { await tilesReady; return { ...(tileSource.info || { kind: 'online' }), error: tileError }; },
+    chooseTileSource: async kind => {
+      if (kind === 'online') { await controller.updatePreferences({ tileSource: 'online' }); await applyTileSource(controller.state.preferences); return { kind: 'online', error: null }; }
+      if (!['mbtiles', 'folder'].includes(kind)) throw new Error('Choose MBTiles or a tile folder.');
+      const picked = await dialog.showOpenDialog(window, kind === 'mbtiles'
+        ? { title: 'Choose an MBTiles file', properties: ['openFile'], filters: [{ name: 'MBTiles', extensions: ['mbtiles'] }] }
+        : { title: 'Choose a {z}/{x}/{y} tile folder', properties: ['openDirectory'] });
+      if (picked.canceled || !picked.filePaths[0]) return null;
+      // Validate by opening it before saving the preference.
+      const probe = new TileSource();
+      try { await probe.configure(kind, picked.filePaths[0]); } finally { probe.close(); }
+      await controller.updatePreferences({ tileSource: kind, tilePath: picked.filePaths[0] });
+      await applyTileSource(controller.state.preferences);
+      return { ...tileSource.info, error: tileError };
+    },
     installRuntime: () => controller.exclusive(async () => {
       if (controller.state.session) throw new Error('Restore the current phone session first.');
       if (app.isPackaged) throw new Error('The desktop release includes its device tools. If they are missing, reinstall a complete Ghost build.');
@@ -118,7 +152,8 @@ async function boot() {
   if (devUrl) await window.loadURL(devUrl);
   else if (existsSync(path.join(dist, 'index.html'))) await window.loadURL('ghost://app/index.html');
   else throw new Error('Build the interface first with npm run build.');
-  await controller.init();
+  try { await controller.init(); } finally { await applyTileSource(controller.state.preferences); }
+  controller.notify();
   poll = setInterval(() => controller.scanDevices().catch(error => { controller.state.warning = error.message; controller.notify(); }), 2000);
   powerMonitor.on('suspend', () => controller.suspend().catch(() => {}));
   powerMonitor.on('resume', () => controller.resume().catch(() => {}));
@@ -146,7 +181,8 @@ async function finishQuit() {
   }
   if (controller.state.session) await controller.sessionEnded({ deviceId: controller.state.session.deviceId, retry: false, error: 'Ghost quit without confirming restoration. Reconnect this phone and choose Retry location or Restore.' });
   clearInterval(poll);
-  if (wakeLock != null) { powerSaveBlocker.stop(wakeLock); wakeLock = null; }
+  wakeLock.release();
+  tileSource.close();
   await Promise.race([controller.dispose({ restore: false }), new Promise(resolve => setTimeout(resolve, 6000))]);
   quitting = true; app.quit();
 }

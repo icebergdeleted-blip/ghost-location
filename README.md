@@ -22,7 +22,9 @@ The downloads include the phone runtimes. No programming tools or Ghost account 
 ## Features
 
 
-- Road routes through up to 12 stops, 45 mph movement, one-second updates, Pause and Resume.
+- Road routes through up to 12 stops, adjustable speed (default 45 mph), one-second updates, Pause and Resume.
+- Route geometry and progress saved to disk, so a route can be resumed manually after Ghost restarts.
+- Optional offline map (local raster MBTiles or tile folder) and self-hosted Photon/OSRM endpoints; see [docs/offline-maps.md](docs/offline-maps.md).
 - Interactive map, manual place search, draggable pin, and latitude/longitude input.
 - First-run Mac/Windows and iPhone/Android survey with a checklist tailored to all four USB configurations.
 - Saved places and recent selections stored locally.
@@ -142,7 +144,9 @@ moves the selected phone to the first road point and begins playback.
 Ghost uses the open-source [OSRM](https://github.com/Project-OSRM/osrm-backend)
 routing service with OpenStreetMap roads. Pins snap to roads within 1 km; if no
 connected driving route exists, planning fails instead of drawing a straight line.
-The speed is fixed at **45 mph (20.1168 m/s)** along the full geometry, irrespective
+The default speed is **45 mph (20.1168 m/s)**. Change it with the **Speed** field
+(1–120 mph, m/s = mph × 0.44704). A change applies to a running route from its next
+one-second update. Speed is applied along the full geometry, irrespective
 of traffic or speed limits. Location commands run every second in the desktop
 backend, including while the window is minimized. The blue dot shows the last
 sent point, not an independently measured phone position. Android reuses Appium
@@ -155,19 +159,27 @@ you press Resume. Slow commands or scheduling stalls pause rather than building 
 backlog or jumping ahead. Timings depend on the operating system and connection latency;
 the app does not guarantee that every phone app consumes each fix.
 
-Route geometry and progress stay in memory. Restarting Ghost does not resume a
-route; it keeps the existing recovery record for Retry or Restore. Restore before
+Route geometry and progress are saved next to the settings file (`route.json`):
+on start, on pause, disconnect and arrival, and at most every five seconds while
+moving. After Ghost restarts, a route that belongs to the unresolved session's
+phone comes back **paused**. **Resume route** first re-sends the last journaled
+point, then continues. Nothing resumes automatically. Restore, or replacing the
+record with a different phone, deletes the saved route. Restore before
 editing an active route or changing phones.
 
 ## Maps, search, and privacy
 
 Search sends your submitted text to the configured Photon provider. Viewing the map
-requests tiles from OpenStreetMap. Device identifiers and saved/session coordinates
+requests tiles from OpenStreetMap unless an offline tile file or folder is selected
+in Settings → Map tiles. Photon and OSRM endpoints can point at self-hosted
+servers; plain HTTP is accepted only for this computer or a private LAN address. Device identifiers and saved/session coordinates
 stay in the local application settings file. Planning a route sends the chosen
 stop coordinates (without device identifiers) to the public OSRM service. Route
 playback itself makes no routing-service requests. Search is rate-limited and cached for
 the running app; there is no autocomplete, background geocoding, or offline tile
-download. Pin and coordinate selection remain available if search fails.
+download. Ghost never downloads tiles for offline use itself; see
+[docs/offline-maps.md](docs/offline-maps.md) to prepare your own. Pin and coordinate
+selection remain available if search or tiles fail.
 
 The default Photon public demo is appropriate only for moderate use and has no
 availability guarantee. Change the HTTPS Photon API endpoint in Settings for a
@@ -232,6 +244,13 @@ pause/resume, arrival, slow transport, and cancellation during an in-flight upda
 Node adapter, JSONL bridge loop, Python bridge, and pinned upstream location API.
 It replaces only the USB/tunnel/DVT peer, then checks repeated acknowledgements,
 an in-place target update, concurrent discovery, and post-Restore silence.
+
+`npm run test:offline-tiles` launches Electron with a generated MBTiles file and the
+OpenStreetMap tile server blocked, and checks that the map draws only local tiles.
+
+`node scripts/persistence-probe.mjs` is a **manual hardware probe** that changes a real
+iPhone's location. It is not part of any automated check. See
+[docs/persistence-findings.md](docs/persistence-findings.md).
 
 `npm run test:native` launches Electron with isolated settings and exercises map
 search, live OSRM road planning, coordinates, saved-place create/rename/delete, setup, preferences, and a

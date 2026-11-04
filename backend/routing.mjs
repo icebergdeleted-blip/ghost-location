@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { place } from './validation.mjs';
+import { place, routingUrl, speedMph, DEFAULT_ROUTING_URL, DEFAULT_SPEED_MPH } from './validation.mjs';
 
 export const ROUTE_SPEED_MPS = 45 * 1609.344 / 3600;
+/** Validated mph → m/s (m/s = mph × 0.44704). The default 45 mph is exactly 20.1168 m/s. */
+// Same expression as ROUTE_SPEED_MPS, so 45 mph gives a bit-identical speed.
+export const speedMps = mph => speedMph(mph) * 1609.344 / 3600;
 const radians = degrees => degrees * Math.PI / 180;
 const longitudeDelta = (from, to) => ((to - from + 540) % 360) - 180;
 
@@ -51,14 +54,17 @@ export function pointAlong(path, distance) {
 }
 
 export class Router {
-  constructor({ fetcher = fetch, now = Date.now } = {}) { this.fetcher = fetcher; this.now = now; this.lastRequest = -Infinity; }
-  async plan(input) {
+  constructor({ fetcher = fetch, now = Date.now, baseUrl = DEFAULT_ROUTING_URL } = {}) { this.fetcher = fetcher; this.now = now; this.lastRequest = -Infinity; this.baseUrl = routingUrl(baseUrl); }
+  configure(baseUrl) { this.baseUrl = routingUrl(baseUrl || DEFAULT_ROUTING_URL); }
+  async plan(input, { speedMph: mph = DEFAULT_SPEED_MPH } = {}) {
+    const speed = speedMps(mph);
     if (!Array.isArray(input) || input.length < 2 || input.length > 12) throw new Error('Add between 2 and 12 route stops.');
     const waypoints = input.map(p => place(p));
     if (this.now() - this.lastRequest < 1000) throw new Error('Wait a second before planning another route.');
     this.lastRequest = this.now();
     const coordinates = waypoints.map(p => `${p.longitude},${p.latitude}`).join(';');
-    const url = `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=full&geometries=geojson&steps=false&alternatives=false&radiuses=${waypoints.map(() => 1000).join(';')}`;
+    const custom = this.baseUrl !== DEFAULT_ROUTING_URL;
+    const url = `${this.baseUrl}route/v1/driving/${coordinates}?overview=full&geometries=geojson&steps=false&alternatives=false&radiuses=${waypoints.map(() => 1000).join(';')}`;
     let data;
     try {
       const response = await this.fetcher(url, { signal: AbortSignal.timeout(20000), headers: { 'User-Agent': 'GhostLocation/0.1.5', Accept: 'application/json' } });
@@ -66,9 +72,12 @@ export class Router {
       const body = await response.text();
       if (body.length > 8_000_000) throw new Error('Route is too large. Choose a shorter path.');
       data = JSON.parse(body);
-    } catch (error) { throw new Error(`Could not plan the road route. Check your internet connection and try again. ${error.message}`); }
+    } catch (error) {
+      const hint = custom ? `Check that the routing service at ${new URL(this.baseUrl).host} is running.` : 'Check your internet connection, or set a local OSRM routing URL in Settings.';
+      throw new Error(`Could not plan the road route. ${hint} ${error.message}`);
+    }
     if (data.code !== 'Ok' || data.routes?.[0]?.geometry?.type !== 'LineString') throw new Error('No drivable route found. Move the pins closer to connected roads and try again.');
     const path = measurePath(data.routes[0].geometry.coordinates);
-    return { id: randomUUID(), waypoints, coordinates: path.coordinates, distanceMeters: path.distanceMeters, durationSeconds: path.distanceMeters / ROUTE_SPEED_MPS, speedMph: 45 };
+    return { id: randomUUID(), waypoints, coordinates: path.coordinates, distanceMeters: path.distanceMeters, durationSeconds: path.distanceMeters / speed, speedMph: speedMph(mph) };
   }
 }

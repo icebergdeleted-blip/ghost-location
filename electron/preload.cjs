@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('ghost', Object.freeze({
   savePlace: place => invoke('savePlace', place),
   deletePlace: id => invoke('deletePlace', id),
   updatePreferences: value => invoke('updatePreferences', value),
+  getTileInfo: () => invoke('getTileInfo'),
+  chooseTileSource: kind => invoke('chooseTileSource', kind),
   installRuntime: () => invoke('installRuntime'),
   onState: callback => {
     if (typeof callback !== 'function') throw new Error('A callback is required.');

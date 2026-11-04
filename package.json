@@ -16,6 +16,8 @@
     "test:ios-stream": "node scripts/stress-ios-refresh.mjs",
     "test:renderer-session": "npm run build && node scripts/check-renderer-session.mjs",
     "test:native": "npm run build && node scripts/smoke-electron.mjs",
+    "test:offline-tiles": "npm run build && node scripts/check-offline-tiles.mjs",
+    "probe:persistence": "node scripts/persistence-probe.mjs",
     "runtime:android": "node scripts/prepare-android.mjs",
     "runtime:ios": "node scripts/build-ios-sidecar.mjs",
     "runtime:prepare": "node scripts/prepare-runtime.mjs",

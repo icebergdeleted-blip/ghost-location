@@ -119,7 +119,7 @@ $('#app').innerHTML = `
         </div>
         <button id="connection-badge" class="connection-badge"><span class="status-dot"></span><span id="connection-text">No phone connected</span>${icon('chevron-down')}</button>
       </div>
-      <div id="map-error" class="map-error" hidden>${icon('help-circle')}<span>Map tiles could not load. Coordinates still work.</span><button id="retry-map" class="text-button">Retry</button></div>
+      <div id="map-error" class="map-error" hidden>${icon('help-circle')}<span id="map-error-text">Map tiles could not load. Coordinates still work.</span><button id="retry-map" class="text-button">Retry</button><button id="offline-map-link" class="text-button">Offline map…</button></div>
       <div id="destination-callout" class="destination-callout" hidden></div>
       <div class="map-controls"><button id="recenter-button" class="map-button" aria-label="Center map on selected place" title="Center map">${icon('crosshair')}</button><div class="zoom-buttons"><button id="zoom-in" class="map-button" aria-label="Zoom in" title="Zoom in">${icon('plus')}</button><button id="zoom-out" class="map-button" aria-label="Zoom out" title="Zoom out">${icon('minus')}</button></div></div>
       <div class="map-bottom"><div id="session-status" class="session-status" role="status"></div></div>
@@ -140,9 +140,10 @@ $('#app').innerHTML = `
             <button id="add-route-stop" class="secondary-button">${icon('plus')} Add selected pin to route</button>
             <ol id="route-stops" class="route-stops"></ol>
             <div class="route-plan-actions"><button id="plan-route" class="secondary-button">Plan road route</button><button id="clear-route" class="text-button">Clear</button></div>
-            <p class="route-provider">Stops are sent to OSRM when you plan. Roads by OpenStreetMap. Internet required.</p>
+            <label class="route-speed"><span>Speed</span><input id="route-speed" type="number" min="1" max="120" step="1" inputmode="numeric" aria-label="Route speed in miles per hour" /><span>mph</span></label>
+            <p id="route-provider" class="route-provider">Stops are sent to OSRM when you plan. Roads by OpenStreetMap. Internet required.</p>
             <div id="route-summary" class="route-summary" hidden></div>
-            <button id="route-play" class="primary-button" disabled>Start route · 45 mph</button>
+            <button id="route-play" class="primary-button" disabled>Start route</button>
             <p id="route-hint" class="action-hint">Add a start and destination, in order.</p>
           </div>
           <div id="fixed-actions"><button id="apply-button" class="primary-button" disabled><span>Set location</span>${icon('arrow-up-right')}</button><p id="apply-hint" class="action-hint">Connect a phone to get started.</p></div><button id="restore-button" class="restore-button" disabled>${icon('rotate-ccw')} Restore real location</button>
@@ -198,7 +199,10 @@ $('#app').innerHTML = `
     <div class="settings-group"><h3>Device setup</h3><div class="configuration-row"><div><strong id="settings-configuration">No setup selected</strong><small>Ghost uses this to show the right connection steps.</small></div><button id="rerun-onboarding" class="secondary-button compact">Change</button></div></div>
     <div class="settings-group"><h3>Location sessions</h3><label class="setting-row"><span><strong>Restore on quit</strong><small>Ghost tries to stop location simulation before it closes. Keep the phone connected.</small></span><input id="restore-preference" type="checkbox" class="switch" /></label></div>
     <div class="settings-group"><h3>Device tools</h3><div id="runtime-status"></div><button id="install-runtime" class="secondary-button">${icon('download')} Prepare device tools</button><p class="settings-note">First-time preparation may need an internet connection.</p></div>
-    <form id="provider-form" class="settings-group"><h3>Place search</h3><label class="field-label" for="provider-url">Photon-compatible endpoint</label><input id="provider-url" class="text-input" type="url" required placeholder="https://photon.komoot.io/api/" /><p class="settings-note">Search runs only when you submit. Map tiles come from OpenStreetMap.</p><div class="button-row"><button type="submit" class="secondary-button compact">Save endpoint</button><button id="reset-provider" type="button" class="text-button">Reset</button></div></form><div class="settings-footer">Ghost 0.1.7 · Free and open source</div>
+    <form id="provider-form" class="settings-group"><h3>Place search</h3><label class="field-label" for="provider-url">Photon-compatible endpoint</label><input id="provider-url" class="text-input" type="url" required placeholder="https://photon.komoot.io/api/" /><p class="settings-note">Search runs only when you submit. Plain HTTP is allowed only for a server on this computer or your private network.</p><div class="button-row"><button type="submit" class="secondary-button compact">Save endpoint</button><button id="reset-provider" type="button" class="text-button">Reset</button></div></form>
+    <form id="routing-form" class="settings-group"><h3>Road routing</h3><label class="field-label" for="routing-url">OSRM-compatible routing URL</label><input id="routing-url" class="text-input" type="url" required placeholder="https://router.project-osrm.org/" /><p class="settings-note">Used only when you choose Plan road route. For offline planning, run your own OSRM server and enter its address, for example http://localhost:5000/.</p><div class="button-row"><button type="submit" class="secondary-button compact">Save routing URL</button><button id="reset-routing" type="button" class="text-button">Reset</button></div></form>
+    <div class="settings-group"><h3>Map tiles</h3><p id="tile-status" class="settings-note" role="status">Online map from OpenStreetMap.</p><div class="button-row wrap"><button id="tiles-online" type="button" class="secondary-button compact">Use online map</button><button id="tiles-mbtiles" type="button" class="secondary-button compact">Choose MBTiles file…</button><button id="tiles-folder" type="button" class="secondary-button compact">Choose tile folder…</button></div><p class="settings-note">Offline maps use raster tiles you prepare yourself (see docs/offline-maps.md). Without tiles, search, pins and coordinate entry still work.</p></div>
+    <div class="settings-footer">Ghost 0.1.7 · Free and open source</div>
   </dialog>
 
   <dialog id="save-dialog" class="small-dialog" aria-labelledby="save-title"><div class="sheet-heading"><div><span class="eyebrow">Saved place</span><h2 id="save-title">Save this place</h2></div><button class="icon-button" data-close="save-dialog" aria-label="Close save place">${icon('x')}</button></div><form id="save-form"><label class="field-label" for="place-name">Name</label><input id="place-name" class="text-input" maxlength="120" required placeholder="Place name" /><input id="place-id" type="hidden" /><p id="save-coordinates" class="settings-note"></p><button class="primary-button" type="submit"><span>Save place</span>${icon('bookmark')}</button></form></dialog>
@@ -207,10 +211,32 @@ $('#app').innerHTML = `
 
 const map = L.map('map', { zoomControl: false, attributionControl: true, minZoom: 2, maxZoom: 19, worldCopyJump: true }).setView([41.8827, -87.6233], 13);
 map.attributionControl.setPrefix(false);
-const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors', keepBuffer: 1, updateWhenIdle: true }).addTo(map);
-let tileErrors = 0;
-tiles.on('tileerror', () => { if (++tileErrors >= 3) $('#map-error').hidden = false; });
-tiles.on('tileload', () => { tileErrors = 0; $('#map-error').hidden = true; });
+const osmAttribution = '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors';
+let tiles = null, tileErrors = 0, tileInfo = { kind: 'online' };
+function useTiles(info = { kind: 'online' }) {
+  tileInfo = info?.kind && info.kind !== 'online' && !info.error ? info : { kind: 'online', error: info?.error };
+  if (tiles) tiles.remove();
+  const offline = tileInfo.kind !== 'online';
+  // Offline tiles are served by the desktop process from the chosen local file only.
+  tiles = L.tileLayer(offline ? 'ghost://app/tiles/{z}/{x}/{y}' : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, ...(offline ? { minNativeZoom: tileInfo.minzoom, maxNativeZoom: Math.min(19, tileInfo.maxzoom) } : {}),
+    attribution: offline ? esc(tileInfo.attribution || `Offline tiles · ${tileInfo.name}`) : osmAttribution, keepBuffer: 1, updateWhenIdle: true,
+  }).addTo(map);
+  tiles.bringToBack();
+  tileErrors = 0; $('#map-error').hidden = true;
+  $('#map-error-text').textContent = offline ? 'Offline tiles are missing for this area or zoom. Coordinates still work.' : 'Map tiles could not load. Coordinates still work.';
+  tiles.on('tileerror', () => { if (++tileErrors >= 3) $('#map-error').hidden = false; });
+  tiles.on('tileload', () => { tileErrors = 0; $('#map-error').hidden = true; });
+  renderTileStatus();
+}
+function renderTileStatus() {
+  const element = $('#tile-status');
+  if (!element) return;
+  element.textContent = tileInfo.kind === 'online'
+    ? `${tileInfo.error ? `Offline tiles unavailable (${tileInfo.error}). ` : ''}Online map from OpenStreetMap. Needs internet.`
+    : `Offline ${tileInfo.kind === 'mbtiles' ? 'MBTiles' : 'tile folder'}: ${tileInfo.name} · zoom ${tileInfo.minzoom}–${tileInfo.maxzoom}. No internet needed for the map.`;
+}
+useTiles();
 const pinIcon = L.divIcon({ className: 'ghost-map-pin', html: '<div class="pin-halo"></div><div class="pin-head"><span></span></div>', iconSize: [48, 58], iconAnchor: [24, 54] });
 let marker = null;
 
@@ -340,6 +366,7 @@ function placeItem(place) {
   return `<div class="saved-place"><button class="saved-place-main" data-place="${esc(place.id)}">${icon('map-pin')}<span><strong>${esc(place.label)}</strong><small>${Number(place.latitude).toFixed(4)}, ${Number(place.longitude).toFixed(4)}</small></span></button><div class="saved-place-actions"><button class="icon-button" data-edit="${esc(place.id)}" aria-label="Rename ${esc(place.label)}" title="Rename">${icon('pencil')}</button><button class="icon-button" data-delete="${esc(place.id)}" aria-label="Remove ${esc(place.label)}" title="Remove">${icon('trash-2')}</button></div></div>`;
 }
 
+const routeSpeed = () => state.route?.speedMph ?? state.preferences?.routeSpeedMph ?? 45;
 const routeTime = seconds => seconds < 60 ? `${Math.ceil(seconds)} sec` : seconds < 3600 ? `${Math.ceil(seconds / 60)} min` : `${Math.floor(seconds / 3600)} hr ${Math.ceil(seconds % 3600 / 60)} min`;
 function fitRoute() {
   if (routeLine) map.fitBounds(routeLine.getBounds(), { paddingTopLeft: [390, 95], paddingBottomRight: [85, 160], maxZoom: 16 });
@@ -378,12 +405,17 @@ function renderRoute() {
     routeStops.splice(Number(button.dataset.removeStop), 1); routePlan = null; drawRoute(); renderRoute(); paintIcons();
   }; });
   $('#route-summary').hidden = !routePlan;
-  if (routePlan) setContent('#route-summary', `<div><strong>${(routePlan.distanceMeters / 1609.344).toFixed(2)} miles</strong><span>45 mph · 1 sec updates</span></div><progress aria-label="Route progress" max="${routePlan.distanceMeters}" value="${route?.traveledMeters || 0}"></progress><p>${route?.status === 'completed' ? 'Arrived at destination' : `${routeTime(route?.remainingSeconds ?? routePlan.durationSeconds)} ${active ? 'remaining' : 'at 45 mph'}`}</p>`);
+  const mph = routeSpeed();
+  if (routePlan) setContent('#route-summary', `<div><strong>${(routePlan.distanceMeters / 1609.344).toFixed(2)} miles</strong><span>${mph} mph · 1 sec updates</span></div><progress aria-label="Route progress" max="${routePlan.distanceMeters}" value="${route?.traveledMeters || 0}"></progress><p>${route?.status === 'completed' ? 'Arrived at destination' : `${routeTime(route?.remainingSeconds ?? routePlan.distanceMeters / (mph * 0.44704))} ${active ? 'remaining' : `at ${mph} mph`}`}</p>`);
+  if (document.activeElement !== $('#route-speed')) $('#route-speed').value = mph;
+  $('#route-speed').disabled = busy || route?.status === 'completed';
+  const routingHost = (() => { try { return new URL(state.preferences.routingUrl || 'https://router.project-osrm.org/').host; } catch { return 'router.project-osrm.org'; } })();
+  $('#route-provider').textContent = routingHost === 'router.project-osrm.org' ? 'Stops are sent to OSRM when you plan. Roads by OpenStreetMap. Internet required.' : `Stops are sent to your routing server (${routingHost}) when you plan.`;
   const device = state.devices.find(d => d.id === selectedDeviceId);
   const otherSession = state.session && state.session.deviceId !== selectedDeviceId;
   const running = route?.status === 'running', paused = route?.status === 'paused';
   $('#route-play').disabled = busy || (active ? !running && (!paused || !device || otherSession || !['ready', 'setup-required'].includes(device.state)) : !routePlan || device?.state !== 'ready' || Boolean(otherSession));
-  $('#route-play').textContent = busy ? 'Working…' : running ? 'Pause route' : paused ? 'Resume route · 45 mph' : route?.status === 'completed' ? 'Route completed' : 'Start route · 45 mph';
+  $('#route-play').textContent = busy ? 'Working…' : running ? 'Pause route' : paused ? `Resume route · ${mph} mph` : route?.status === 'completed' ? 'Route completed' : `Start route · ${mph} mph`;
   $('#route-hint').textContent = active ? route.message : otherSession ? 'Restore the current session before switching phones.' : !routePlan ? 'Add a start and destination, then plan the route.' : !device ? 'Connect a phone to start. The route is ready.' : 'Start moves your phone to the first stop, then follows the road.';
   if (route?.point && inRoute) {
     const point = [route.point.latitude, route.point.longitude];
@@ -423,7 +455,7 @@ function renderSession() {
   const recovering = ['waiting', 'unknown', 'error'].includes(session?.status);
   const recoveryText = recovering ? `<span class="session-recovery">${session.autoReconnect ? 'Ghost will retry this phone automatically. Restore cancels retry.' : 'Reconnect this phone, then retry or restore.'}</span>` : '';
   const statusIcon = session?.status === 'reconnecting' ? 'refresh-cw' : session ? ['unknown', 'error', 'waiting'].includes(session.status) ? 'help-circle' : 'map-pin' : 'circle';
-  setContent('#session-status', `<span class="session-status-icon">${icon(statusIcon, session?.status === 'reconnecting' ? 'spin' : '')}</span><div><strong>${session ? session.status === 'active' && state.route ? ({ running: 'Following route · 45 mph', paused: 'Route paused', completed: 'Arrived', starting: 'Starting route…' }[state.route.status]) : labels[session.status] || 'Session needs attention' : 'Ready'}</strong><span>${esc(state.route?.message || session?.message || (session ? session.label || 'Keep your phone connected.' : state.devices.some((device) => device.state === 'ready') ? 'Choose a place to begin.' : 'Connect a phone and choose a place.'))}</span>${recoveryText}${refreshText}</div>${session?.status === 'active' ? '<span class="live-tag"><span></span>Active</span>' : ''}`);
+  setContent('#session-status', `<span class="session-status-icon">${icon(statusIcon, session?.status === 'reconnecting' ? 'spin' : '')}</span><div><strong>${session ? session.status === 'active' && state.route ? ({ running: `Following route · ${routeSpeed()} mph`, paused: state.route.restored ? 'Saved route paused' : 'Route paused', completed: 'Arrived', starting: 'Starting route…' }[state.route.status]) : labels[session.status] || 'Session needs attention' : 'Ready'}</strong><span>${esc(state.route?.message || session?.message || (session ? session.label || 'Keep your phone connected.' : state.devices.some((device) => device.state === 'ready') ? 'Choose a place to begin.' : 'Connect a phone and choose a place.'))}</span>${recoveryText}${refreshText}</div>${session?.status === 'active' ? '<span class="live-tag"><span></span>Active</span>' : ''}`);
 }
 
 function renderRuntime() {
@@ -479,7 +511,7 @@ function renderView() {
   $('#saved-nav-button').setAttribute('aria-pressed', String(showingSaved));
   $('#panel-eyebrow').textContent = showingSaved ? 'Library' : 'Location';
   $('#panel-title').textContent = showingSaved ? 'Saved places' : locationMode === 'route' ? 'Follow a route' : 'Set a location';
-  $('#panel-subtitle').textContent = showingSaved ? 'Select a place to return to the map.' : locationMode === 'route' ? 'Choose stops. Move along the road at 45 mph.' : 'Choose a phone and a point on the map.';
+  $('#panel-subtitle').textContent = showingSaved ? 'Select a place to return to the map.' : locationMode === 'route' ? `Choose stops. Move along the road at ${routeSpeed()} mph.` : 'Choose a phone and a point on the map.';
 }
 
 function handoffPhone() {
@@ -560,9 +592,25 @@ $('#recenter-button').onclick = () => {
   else map.flyTo(selectedPlace ? [selectedPlace.latitude, selectedPlace.longitude] : [41.8827, -87.6233], selectedPlace ? Math.max(13, map.getZoom()) : 13, { duration: 0.6 });
 };
 $('#retry-map').onclick = () => { tileErrors = 0; $('#map-error').hidden = true; tiles.redraw(); };
+$('#offline-map-link').onclick = () => $('#settings-button').click();
+const chooseTiles = kind => async () => {
+  if (!api.chooseTileSource) { notify('Offline maps are available in the desktop app.', true); return; }
+  const info = await runOperation(() => api.chooseTileSource(kind));
+  if (info) { useTiles(info); notify(info.kind === 'online' ? 'Using the online map.' : `Offline map selected: ${info.name}.`); }
+};
+$('#tiles-online').onclick = chooseTiles('online');
+$('#tiles-mbtiles').onclick = chooseTiles('mbtiles');
+$('#tiles-folder').onclick = chooseTiles('folder');
+$('#route-speed').onchange = () => {
+  const value = Number($('#route-speed').value);
+  if (!Number.isFinite(value) || value < 1 || value > 120) { notify('Choose a route speed from 1 to 120 mph.', true); $('#route-speed').value = routeSpeed(); return; }
+  runOperation(() => api.updatePreferences({ routeSpeedMph: value }), `Route speed set to ${Math.round(value * 10) / 10} mph.`);
+};
+$('#routing-form').onsubmit = (event) => { event.preventDefault(); const url = $('#routing-url').value.trim(); try { new URL(url); } catch { notify('Enter a valid routing URL.', true); return; } runOperation(() => api.updatePreferences({ routingUrl: url }), 'Routing URL saved.'); };
+$('#reset-routing').onclick = () => { $('#routing-url').value = 'https://router.project-osrm.org/'; runOperation(() => api.updatePreferences({ routingUrl: 'https://router.project-osrm.org/' }), 'Default routing service restored.'); };
 $('#connection-badge').onclick = openSetup;
 $('#help-button').onclick = openSetup;
-$('#settings-button').onclick = () => { $('#provider-url').value = state.preferences.geocoderUrl || 'https://photon.komoot.io/api/'; renderRuntime(); paintIcons(); $('#settings-dialog').showModal(); };
+$('#settings-button').onclick = () => { $('#provider-url').value = state.preferences.geocoderUrl || 'https://photon.komoot.io/api/'; $('#routing-url').value = state.preferences.routingUrl || 'https://router.project-osrm.org/'; renderTileStatus(); renderRuntime(); paintIcons(); $('#settings-dialog').showModal(); };
 $('#scan-button').onclick = () => runOperation(() => api.scanDevices(), 'Device list refreshed.');
 $('#setup-scan').onclick = async () => { const result = await runOperation(() => api.scanDevices()); if (result && !result.devices.some((device) => device.platform === setupPlatform && device.state !== 'offline')) $('#setup-detection').textContent = `No ${platformName(setupPlatform)} found. Check the data cable, unlock the phone, and accept its prompt.`; };
 $('#change-configuration').onclick = openOnboarding;
@@ -584,7 +632,7 @@ $('#restore-button').onclick = () => runOperation(() => api.stopLocation(), 'Res
 $('#toast-close').onclick = () => { $('#toast').hidden = true; clearTimeout(toastTimer); };
 $('#install-runtime').onclick = () => runOperation(() => api.installRuntime(), 'Device tools checked.');
 $('#restore-preference').onchange = () => runOperation(() => api.updatePreferences({ restoreOnQuit: $('#restore-preference').checked }));
-$('#provider-form').onsubmit = (event) => { event.preventDefault(); const url = $('#provider-url').value.trim(); try { if (new URL(url).protocol !== 'https:') throw new Error(); } catch { notify('Use a valid HTTPS URL for your search provider.', true); return; } runOperation(() => api.updatePreferences({ geocoderUrl: url }), 'Search endpoint saved.'); };
+$('#provider-form').onsubmit = (event) => { event.preventDefault(); const url = $('#provider-url').value.trim(); try { if (!['https:', 'http:'].includes(new URL(url).protocol)) throw new Error(); } catch { notify('Use a valid HTTPS URL for your search provider (HTTP only on this computer or your network).', true); return; } runOperation(() => api.updatePreferences({ geocoderUrl: url }), 'Search endpoint saved.'); };
 $('#reset-provider').onclick = () => { $('#provider-url').value = 'https://photon.komoot.io/api/'; runOperation(() => api.updatePreferences({ geocoderUrl: 'https://photon.komoot.io/api/' }), 'Default search endpoint restored.'); };
 $('#save-form').onsubmit = async (event) => { event.preventDefault(); const label = $('#place-name').value.trim(); if (!label || !placeBeingSaved) return; const result = await runOperation(() => api.savePlace({ ...placeBeingSaved, label }), 'Place saved.'); if (result) $('#save-dialog').close(); };
 $('#coordinate-form').onsubmit = (event) => { event.preventDefault(); selectPlace({ latitude: $('#latitude').value, longitude: $('#longitude').value, label: 'Custom coordinates' }); };
@@ -665,6 +713,10 @@ api.onState(acceptState);
 render();
 api.getState().then(async next => {
   acceptState(next);
+  if (api.getTileInfo) {
+    const info = await api.getTileInfo().catch(() => null);
+    if (info) { useTiles(info); if (info.error) notify(`Offline map unavailable: ${info.error} Using the online map.`, true); }
+  }
   if (api.getRoute) {
     const planned = await api.getRoute();
     if (planned) { routePlan = planned; routeStops = planned.waypoints; drawRoute(); renderRoute(); paintIcons(); }

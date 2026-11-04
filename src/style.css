@@ -404,6 +404,10 @@ dialog[open] { animation: rise .18s ease-out; }
 .route-stop-number { display: grid; place-items: center; width: 24px; height: 24px; flex: 0 0 auto; background: var(--fill); border-radius: 50%; font-size: 12px; }
 .route-plan-actions { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
 .route-provider { color: var(--secondary); font-size: 12px; line-height: 1.5; margin: 12px 0; }
+.route-speed { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; color: var(--secondary); font-size: 12px; }
+.route-speed input { width: 72px; min-height: 34px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 9px; background: rgba(255,255,255,.65); color: var(--text); font-size: 13px; }
+.route-speed input:focus { outline: 0; border-color: rgba(0,122,255,.55); box-shadow: 0 0 0 3px rgba(0,122,255,.12); }
+.button-row.wrap { flex-wrap: wrap; gap: 8px 10px; }
 .route-summary { margin: 17px 0; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.5); }
 .route-summary > div { display: flex; flex-direction: column; gap: 5px; }
 .route-summary strong { font-size: 21px; letter-spacing: -.5px; }

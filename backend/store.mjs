@@ -10,6 +10,10 @@ export const defaults = () => ({
     onboardingComplete: false,
     hostPlatform: null,
     phonePlatform: null,
+    routeSpeedMph: 45,
+    routingUrl: 'https://router.project-osrm.org/',
+    tileSource: 'online',
+    tilePath: null,
   }
 });
 
