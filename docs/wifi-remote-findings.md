@@ -31,7 +31,25 @@ need code running on the phone.
 
 Verified on hardware: discovery found the phone 6 out of 6 times, in about 2.5 s each.
 
-## Still blocked
+## Resolved: RemotePairing (2026-11-05)
+
+pymobiledevice3 11.12.4's SRP code produced a pairing proof that iOS 27.0.1 rejects. With 11.50.0,
+`lockdown remotepairing --pair` over USB created the RemotePairing record without any prompt.
+Ghost's Wi-Fi and remote connections now tunnel through RemotePairing:
+
+| Hardware result (iPhone17,3, iOS 27.0.1) | Outcome |
+| --- | --- |
+| Hotspot Wi-Fi, Bonjour `_remotepairing._tcp` | tunnel in 1.0 s; 7/7 location acks; clear sent |
+| Tailscale 100.x, phone on the same hotspot | tunnel in 1.5 s; 7/7 acks; clear sent |
+| Tailscale 100.x, phone on campus Wi-Fi, relayed (DERP), unplugged | tunnel in 3.6 s; 7/7 acks (about 0.6 s RTT); clear sent |
+| Tailscale, phone on cellular only (Wi-Fi off) | ports 49152 and 62078 refused; iOS switches the services off |
+| Ghost Controller in remote mode (`scripts/remote-e2e-check.mjs`) | found on the first scan; active in 1.5 s; 8 refresh acks in 8 s; Restore cleared the session |
+
+Limits: the iPhone must be joined to some Wi-Fi network (any network; it doesn't have to match
+the computer's). The developer image needs one USB Prepare after each iPhone restart. The spoof
+lasts only while the tunnel is up.
+
+## Earlier blocker (superseded)
 
 `CoreDeviceProxy` over a Wi-Fi lockdown connection starts, but the phone closes the connection at
 `request_tunnel_establish`. Ghost 0.1.6's Wi-Fi design (lockdown, then CoreDeviceProxy, then RSD)
