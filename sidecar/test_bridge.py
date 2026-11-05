@@ -254,7 +254,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_discovery_does_not_hold_refresh_lock(self):
         bridge, session, _ = self.connected_bridge(refresh_interval=0.01)
         discovery_started, discovery_reply = asyncio.Event(), asyncio.Event()
-        async def discover():
+        async def discover(udid=None):
             discovery_started.set()
             await discovery_reply.wait()
             return []
@@ -281,39 +281,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "did not close completely"):
             await bridge_module.Bridge.connect(bridge, "phone")
 
-    async def test_wifi_factory_uses_only_paired_exact_identity_and_closes_other_phones(self):
-        wanted = "00008030-0000000000000001"
-        other = SimpleNamespace(udid="00008030-0000000000000002", paired=True, close=AsyncMock())
-        selected = SimpleNamespace(udid=wanted, paired=True, close=AsyncMock())
-        options = []
-        async def network_devices(**kwargs):
-            options.append(kwargs)
-            yield "192.168.1.21", other
-            yield "192.168.1.20", selected
-        token = bridge_module.CONNECTION.set("wifi")
-        try:
-            with patch.object(bridge_module, "wifi_lockdowns", network_devices), patch.object(bridge_module, "usb_lockdown", AsyncMock()) as usb:
-                with patch.object(bridge_module.CoreDeviceTunnelProxy, "create", AsyncMock(return_value="proxy")):
-                    self.assertEqual(await bridge_module.strict_usb_provider(wanted, True, True), ("proxy", selected))
-                usb.assert_not_awaited()
-            self.assertEqual(options[0]["udid"], wanted)
-            other.close.assert_awaited_once()
-            selected.close.assert_not_awaited()
-        finally:
-            bridge_module.CONNECTION.reset(token)
-
-    async def test_wifi_missing_phone_never_falls_back_to_usb(self):
-        async def network_devices(**kwargs):
-            if False:
-                yield None
-        token = bridge_module.CONNECTION.set("wifi")
-        try:
-            with patch.object(bridge_module, "wifi_lockdowns", network_devices), patch.object(bridge_module, "usb_lockdown", AsyncMock()) as usb:
-                with self.assertRaisesRegex(ConnectionError, "not found on Wi-Fi"):
-                    await bridge_module.connection_lockdown("00008030-0000000000000001")
-                usb.assert_not_awaited()
-        finally:
-            bridge_module.CONNECTION.reset(token)
+    # Network transport (RemotePairing) identity and fallback rules live in test_remote_pairing.py.
 
     async def test_wifi_requests_keep_streaming_and_clear_the_session(self):
         bridge, session, _ = self.connected_bridge(refresh_interval=0.005)
@@ -356,20 +324,6 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(RuntimeError, "owns the USB session"):
                 await bridge.dispatch("enable-wifi", {"udid": "another-phone"})
 
-    async def test_wifi_discovery_deduplicates_and_closes_connections(self):
-        bridge = bridge_module.Bridge()
-        lockdown = AsyncMock()
-        lockdown.udid = "00008030-0000000000000001"
-        lockdown.paired = True
-        lockdown.__aenter__.return_value = lockdown
-        async def devices(**kwargs):
-            yield "192.168.1.20", lockdown
-            yield "fe80::1", lockdown
-        bridge.describe = AsyncMock(return_value={"id": "phone", "connection": "wifi"})
-        with patch.object(bridge_module, "wifi_lockdowns", devices):
-            result = await bridge.dispatch("discover", {"connection": "wifi"})
-        self.assertEqual(len(result), 1)
-        self.assertEqual(lockdown.__aexit__.await_count, 2)
 
 
 if __name__ == "__main__":

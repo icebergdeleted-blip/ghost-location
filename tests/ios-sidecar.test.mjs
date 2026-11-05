@@ -19,8 +19,8 @@ test('Python persistence probe helper validates input and never claims an acknow
   });
   assert.equal(result.status, 0, result.stderr || result.error?.message);
 });
-test('Python Wi-Fi discovery matches phones by pairing identity, not a Private Wi-Fi Address', { skip: !existsSync(python) }, () => {
-  const result = spawnSync(python, ['-m', 'unittest', 'test_wifi_identity.py'], {
+test('Python network transport uses RemotePairing with exact identity and never falls back to USB', { skip: !existsSync(python) }, () => {
+  const result = spawnSync(python, ['-m', 'unittest', 'test_remote_pairing.py'], {
     cwd: path.join(root, 'sidecar'), encoding: 'utf8', timeout: 30000,
   });
   assert.equal(result.status, 0, result.stderr || result.error?.message);
