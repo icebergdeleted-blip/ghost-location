@@ -292,11 +292,11 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             yield "192.168.1.20", selected
         token = bridge_module.CONNECTION.set("wifi")
         try:
-            with patch.object(bridge_module, "get_mobdev2_lockdowns", network_devices), patch.object(bridge_module, "usb_lockdown", AsyncMock()) as usb:
+            with patch.object(bridge_module, "wifi_lockdowns", network_devices), patch.object(bridge_module, "usb_lockdown", AsyncMock()) as usb:
                 with patch.object(bridge_module.CoreDeviceTunnelProxy, "create", AsyncMock(return_value="proxy")):
                     self.assertEqual(await bridge_module.strict_usb_provider(wanted, True, True), ("proxy", selected))
                 usb.assert_not_awaited()
-            self.assertTrue(options[0]["only_paired"])
+            self.assertEqual(options[0]["udid"], wanted)
             other.close.assert_awaited_once()
             selected.close.assert_not_awaited()
         finally:
@@ -308,7 +308,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 yield None
         token = bridge_module.CONNECTION.set("wifi")
         try:
-            with patch.object(bridge_module, "get_mobdev2_lockdowns", network_devices), patch.object(bridge_module, "usb_lockdown", AsyncMock()) as usb:
+            with patch.object(bridge_module, "wifi_lockdowns", network_devices), patch.object(bridge_module, "usb_lockdown", AsyncMock()) as usb:
                 with self.assertRaisesRegex(ConnectionError, "not found on Wi-Fi"):
                     await bridge_module.connection_lockdown("00008030-0000000000000001")
                 usb.assert_not_awaited()
@@ -366,7 +366,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             yield "192.168.1.20", lockdown
             yield "fe80::1", lockdown
         bridge.describe = AsyncMock(return_value={"id": "phone", "connection": "wifi"})
-        with patch.object(bridge_module, "get_mobdev2_lockdowns", devices):
+        with patch.object(bridge_module, "wifi_lockdowns", devices):
             result = await bridge.dispatch("discover", {"connection": "wifi"})
         self.assertEqual(len(result), 1)
         self.assertEqual(lockdown.__aexit__.await_count, 2)

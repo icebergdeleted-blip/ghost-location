@@ -10,7 +10,11 @@ from datetime import datetime, timezone
 import importlib.metadata
 import json
 import logging
+import ipaddress
 import math
+import os
+from pathlib import Path
+import plistlib
 import re
 import sys
 
@@ -26,7 +30,9 @@ logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
 from packaging.version import Version
 from pymobiledevice3 import usbmux
 from pymobiledevice3.exceptions import AlreadyMountedError
-from pymobiledevice3.lockdown import create_using_usbmux, get_mobdev2_lockdowns
+from pymobiledevice3.bonjour import browse_mobdev2
+from pymobiledevice3.common import get_home_folder
+from pymobiledevice3.lockdown import create_using_tcp, create_using_usbmux
 from pymobiledevice3.remote import userspace_tunnel
 from pymobiledevice3.remote.tunnel_service import CoreDeviceTunnelProxy
 from pymobiledevice3.services.dvt.instruments.dvt_provider import DvtProvider
@@ -62,15 +68,117 @@ async def usb_lockdown(udid, autopair=False):
 CONNECTION = ContextVar("ghost_connection", default="usb")
 
 
+UDID_PATTERN = re.compile(r"[A-Za-z0-9-]{8,80}")
+WIFI_ATTEMPT_TIMEOUT = 5.0
+
+
+def local_pair_records(folder=None, udid=None):
+    """Lockdown pair records saved by "Enable Wi-Fi" (one <udid>.plist per trusted phone)."""
+    records = {}
+    for file in Path(folder or get_home_folder()).glob("*.plist"):
+        name = file.stem
+        if name.startswith("remote_") or not UDID_PATTERN.fullmatch(name) or (udid is not None and name != udid):
+            continue
+        try:
+            record = plistlib.loads(file.read_bytes())
+        except Exception:
+            continue
+        if isinstance(record, dict):
+            records[name] = record
+    return records
+
+
+def wifi_debug(*parts):
+    # Opt-in diagnostics on stderr only (never the protocol stream); no secrets are printed.
+    if os.environ.get("GHOST_DEBUG_WIFI"):
+        print("wifi:", *parts, file=sys.stderr, flush=True)
+
+
+def address_order(addresses):
+    """Routable IPv4 first; scoped link-local IPv6 last (it can name the wrong interface)."""
+    def rank(address):
+        try:
+            ip = ipaddress.ip_address(address.full_ip.split("%", 1)[0])
+        except ValueError:
+            return 3
+        return 0 if ip.version == 4 else 2 if ip.is_link_local else 1
+    return sorted(addresses, key=rank)
+
+
+# Last address where each phone PROVED its identity. Only a hint for the next lookup:
+# identity is re-verified (accepted pairing + reported UDID) on every connection.
+VERIFIED_ADDRESSES = {}
+
+
+async def verified_lockdown(address, record_udid, record):
+    """Connect to one address with one pair record; return the lockdown only if it proves identity."""
+    try:
+        lockdown = await asyncio.wait_for(
+            create_using_tcp(hostname=address, autopair=False, pair_record=record), WIFI_ATTEMPT_TIMEOUT)
+    except BaseException as error:
+        if isinstance(error, (KeyboardInterrupt, SystemExit, asyncio.CancelledError)):
+            raise
+        wifi_debug("connect failed", address, type(error).__name__)
+        return None
+    wifi_debug("lockdown", address, "paired" if lockdown.paired else "not paired",
+               "udid match" if lockdown.udid == record_udid else "udid mismatch")
+    if lockdown.paired and lockdown.udid == record_udid:
+        VERIFIED_ADDRESSES[record_udid] = address
+        return lockdown
+    await lockdown.close()
+    return None
+
+
+async def wifi_lockdowns(udid=None, timeout=2, records=None):
+    """Yield (address, lockdown) for trusted iPhones found by Bonjour on this network.
+
+    Identity comes from a pairing record that the phone accepts plus the UDID it reports,
+    never from the Bonjour name. Upstream's matcher compares the Bonjour Wi-Fi MAC with the
+    record's hardware MAC, so it silently skips every iPhone using a Private Wi-Fi Address
+    (on by default since iOS 14).
+    """
+    records = local_pair_records(udid=udid) if records is None else records
+    if not records:
+        wifi_debug("no pair records")
+        return
+    found = set()
+    # Fast path: the address each phone last proved itself at. Back-to-back Bonjour
+    # browses (prepare, then tunnel) can come back empty within the same second.
+    for record_udid, record in records.items():
+        address = VERIFIED_ADDRESSES.get(record_udid)
+        if address and (lockdown := await verified_lockdown(address, record_udid, record)):
+            found.add(record_udid)
+            yield address, lockdown
+    if len(found) == len(records):
+        return
+    answers = await browse_mobdev2(timeout=timeout)
+    if not answers:
+        answers = await browse_mobdev2(timeout=timeout * 2)
+    wifi_debug("bonjour answers", len(answers))
+    for answer in answers:
+        for address in address_order(answer.addresses):
+            matched = False
+            for record_udid, record in records.items():
+                if record_udid in found:
+                    continue
+                if lockdown := await verified_lockdown(address.full_ip, record_udid, record):
+                    found.add(record_udid)
+                    matched = True
+                    yield address.full_ip, lockdown
+                    break
+            if matched:
+                break
+
+
 async def connection_lockdown(udid, autopair=False):
     if CONNECTION.get() == "usb":
         return await usb_lockdown(udid, autopair=autopair)
-    if not isinstance(udid, str) or not re.fullmatch(r"[A-Za-z0-9-]{8,80}", udid):
+    if not isinstance(udid, str) or not UDID_PATTERN.fullmatch(udid):
         raise ValueError("A specific iPhone identifier is required.")
-    async with asyncio.timeout(8):
-        async with aclosing(get_mobdev2_lockdowns(only_paired=True, timeout=2)) as devices:
+    async with asyncio.timeout(15):
+        async with aclosing(wifi_lockdowns(udid=udid, timeout=2)) as devices:
             async for _address, lockdown in devices:
-                # Bonjour names and pairing records alone do not establish identity.
+                # A pairing the phone accepted, plus a matching reported UDID, establishes identity.
                 if lockdown.udid == udid and lockdown.paired:
                     return lockdown
                 await lockdown.close()
@@ -122,8 +230,8 @@ class Bridge:
             seen = set()
             # Bound Bonjour discovery so an unreachable paired phone cannot hang a scan.
             try:
-                async with asyncio.timeout(8):
-                    async with aclosing(get_mobdev2_lockdowns(only_paired=True, timeout=2)) as devices:
+                async with asyncio.timeout(15):
+                    async with aclosing(wifi_lockdowns(timeout=2)) as devices:
                         async for _address, lockdown in devices:
                             async with lockdown:
                                 if lockdown.udid not in seen and lockdown.paired:
@@ -163,6 +271,12 @@ class Bridge:
                 raise RuntimeError("This version requires iOS 17.4 or later.")
             if not await lockdown.get_developer_mode_status():
                 raise RuntimeError("Enable Developer Mode in Settings → Privacy & Security, restart, and confirm it.")
+            if CONNECTION.get() == "wifi":
+                # Hardware-verified on iOS 27: the phone starts the image mounter over Wi-Fi but
+                # closes the connection on the first request, so the image can only be checked or
+                # mounted over USB. It stays mounted until the phone restarts. If it is missing,
+                # the DVT connection fails next and is reported as an error, never as success.
+                return {"ready": True, "message": "Using the developer image mounted over USB. After the iPhone restarts, connect it by USB once and choose Prepare."}
             async with PersonalizedImageMounter(lockdown) as mounter:
                 if not await mounter.is_image_mounted("Personalized"):
                     # Keep potentially slow first-run download off the session event loop.
