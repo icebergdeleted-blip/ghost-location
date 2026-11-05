@@ -14,6 +14,13 @@ class FakeService:
     async def sendall(self, data):
         self.sink.append(data)
 
+    # pymobiledevice3 11.50 opens the developer service with `async with` and closes it.
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
 
 class ProbeTests(unittest.IsolatedAsyncioTestCase):
     def test_parser_requires_explicit_udid_and_valid_coordinates(self):
