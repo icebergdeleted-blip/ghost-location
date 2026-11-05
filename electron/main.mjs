@@ -80,6 +80,7 @@ async function boot() {
     connectWifi: value => controller.connectWifi(value),
     scanDevices: () => controller.scanDevices(),
     prepareDevice: id => controller.prepareDevice(id),
+    pairRemote: id => controller.pairRemote(id),
     applyLocation: value => controller.applyLocation(value),
     stopLocation: () => controller.stopLocation(),
     getRoute: () => controller.getRoute(),

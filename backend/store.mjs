@@ -14,6 +14,8 @@ export const defaults = () => ({
     routingUrl: 'https://router.project-osrm.org/',
     tileSource: 'online',
     tilePath: null,
+    remoteHost: null,
+    remoteUdid: null,
   }
 });
 

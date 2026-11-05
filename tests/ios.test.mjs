@@ -396,9 +396,12 @@ test('Wi-Fi handoff preflight bypasses the USB cache and requires the same ready
     await new Promise(setImmediate);
     assert.equal(h.requests[0].method, 'enable-wifi'); assert.equal(h.requests[0].params.connection || 'usb', 'usb');
     h.reply(h.requests[0], {enabled: true}); await new Promise(setImmediate);
-    assert.equal(h.requests[1].method, 'discover'); assert.equal(h.requests[1].params.connection, 'wifi');
+    // iOS 27 network tunnels need a RemotePairing record, created promptlessly over USB first.
+    assert.equal(h.requests[1].method, 'pair-remote'); assert.equal(h.requests[1].params.connection || 'usb', 'usb');
+    h.reply(h.requests[1], {paired: true}); await new Promise(setImmediate);
+    assert.equal(h.requests[2].method, 'discover'); assert.equal(h.requests[2].params.connection, 'wifi');
     const wireless = {...device, id: matching ? device.id : 'ios:other', connection: 'wifi', state: 'ready'};
-    h.reply(h.requests[1], [wireless]);
+    h.reply(h.requests[2], [wireless]);
     if (matching) assert.deepEqual(await outcome, wireless); else await outcome;
     assert.equal(h.adapter.connection, 'usb'); h.child.kill();
   }

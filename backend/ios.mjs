@@ -3,6 +3,8 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 
+const label = connection => connection === 'remote' ? 'remote (Tailscale)' : connection === 'wifi' ? 'Wi-Fi' : 'USB';
+
 /** Persistent, private stdio bridge. No shell, network listener, or implicit device selection. */
 export class IosAdapter {
   constructor({ rootPath, resourcesPath, runner, onSessionEnd = () => {}, onLocationRefresh = () => {}, now = () => Date.now() } = {}) {
@@ -25,6 +27,8 @@ export class IosAdapter {
     this.closed = false;
     this.queue = Promise.resolve();
     this.stderr = '';
+    // "remote" connection: the iPhone's IP literal (e.g. Tailscale 100.x) and which phone it is.
+    this.remote = { host: null, udid: null };
   }
 
   runtime() {
@@ -162,7 +166,11 @@ export class IosAdapter {
   deviceParams(device) {
     if (!device || device.platform !== 'ios' || device.connection !== (this.connection || 'usb') ||
         typeof device.serial !== 'string' || !/^[A-Za-z0-9-]{8,80}$/.test(device.serial) ||
-        device.id !== `ios:${device.serial}`) throw new Error('Select an iPhone on the current USB or Wi-Fi connection.');
+        device.id !== `ios:${device.serial}`) throw new Error('Select an iPhone on the current USB, Wi-Fi or remote connection.');
+    if (device.connection === 'remote') {
+      if (!this.remote.host || this.remote.udid !== device.serial) throw new Error('Set up remote access for this iPhone and enter its remote address first.');
+      return { udid: device.serial, connection: 'remote', host: this.remote.host };
+    }
     return { udid: device.serial, ...(device.connection === 'wifi' ? {connection: 'wifi'} : {}) };
   }
 
@@ -175,13 +183,20 @@ export class IosAdapter {
     if (this.cachedDevice && this.cachedDevice.connection === (this.connection || 'usb') && this.lastAcknowledgementAt !== null && age >= 0 && age <= 5000) {
       // A fresh reply on the persistent USB DVT stream is stronger evidence of
       // this selected phone's presence than another independent lockdown probe.
-      return [{ ...this.cachedDevice, state: 'ready', detail: `${this.cachedDevice.connection === 'wifi' ? 'Wi-Fi' : 'USB'} connection confirmed by location command acknowledgements.` }];
+      return [{ ...this.cachedDevice, state: 'ready', detail: `${label(this.cachedDevice.connection)} connection confirmed by location command acknowledgements.` }];
     }
-    const devices = await this.request('discover', {connection: this.connection || 'usb'});
+    let params = {connection: this.connection || 'usb'};
+    if (params.connection === 'remote') {
+      // Remote has no discovery: ask exactly the configured phone at exactly the configured address.
+      if (!this.remote.host || !this.remote.udid) return [];
+      params = {...params, host: this.remote.host, udid: this.remote.udid};
+    }
+    const devices = await this.request('discover', params, params.connection === 'usb' ? 30000 : 40000);
     return devices.filter((device) => device.platform === 'ios' && device.connection === (this.connection || 'usb'));
   }
   async prepareWifi(device) {
     await this.enableWifi(device);
+    await this.pairRemote(device); // iOS 27 network tunnels need a RemotePairing record.
     const devices = await this.request('discover', {connection: 'wifi'}, 15000);
     const wireless = devices.find(item => item.id === device.id && item.connection === 'wifi' && item.state === 'ready');
     if (!wireless) throw new Error('Your iPhone is not reachable on Wi-Fi yet. Keep it unlocked on the same network, then try again.');
@@ -190,6 +205,11 @@ export class IosAdapter {
   async enableWifi(device) {
     if (device.connection !== 'usb') throw new Error('Connect this iPhone by USB to enable Wi-Fi.');
     return this.request('enable-wifi', this.deviceParams(device), 60_000);
+  }
+  /** Create this computer's RemotePairing record over USB (promptless). Needed for Wi-Fi and remote. */
+  async pairRemote(device) {
+    if (device.connection !== 'usb') throw new Error('Connect this iPhone by USB to set up remote access.');
+    return this.request('pair-remote', this.deviceParams(device), 60_000);
   }
   async prepare(device) { return this.request('prepare', this.deviceParams(device), 180000); }
   async set(device, { latitude, longitude, sessionId = null, reconnecting = false }) {

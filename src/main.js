@@ -163,9 +163,17 @@ $('#app').innerHTML = `
   <dialog id="wifi-dialog" class="sheet-dialog" aria-labelledby="wifi-title">
     <div class="sheet-heading"><div><span class="eyebrow">Phone connection</span><h2 id="wifi-title">Connect over Wi-Fi</h2></div><button class="icon-button" data-close="wifi-dialog" aria-label="Close connection settings">${icon('x')}</button></div>
     <p class="sheet-intro">Keep your phone and computer on the same Wi-Fi network. Leave the cable connected until Ghost confirms the switch.</p>
-    <div class="location-modes" role="group" aria-label="Connection method"><button data-connection="usb">USB cable</button><button data-connection="wifi">Wi-Fi</button></div>
+    <div class="location-modes" role="group" aria-label="Connection method"><button data-connection="usb">USB cable</button><button data-connection="wifi">Wi-Fi</button><button data-connection="remote">Remote</button></div>
     <p id="wifi-status" class="settings-note" role="status"></p>
     <div id="wifi-handoff" class="settings-group" hidden><button id="switch-to-wifi" class="primary-button">Switch to Wi-Fi</button><p class="settings-note">Your current location carries over. A running route pauses during the switch and continues once connected.</p><p id="wifi-android-note" class="settings-note" hidden>This enables Android network debugging on port 5555. Use a trusted network; restart the phone to turn it off.</p></div>
+    <div id="remote-access" class="settings-group">
+      <h3>iPhone remote access (Tailscale)</h3>
+      <p class="settings-note">Control your iPhone from anywhere on your Tailscale network. The iPhone must stay joined to some Wi-Fi network with Tailscale on; it does not work on cellular alone. Ghost keeps sending the location while connected, and the phone returns to its real location within about a minute if the connection drops.</p>
+      <ol class="wifi-steps"><li>Connect the iPhone by USB, select it, then choose <strong>Set up remote access</strong>. This is a one-time step; it appears on the iPhone under Settings → Developer → Paired Computers, where you can remove it.</li><li>Enter the iPhone’s Tailscale address (100.x.x.x, shown in the Tailscale app).</li><li>Choose <strong>Remote</strong> above. After each iPhone restart, connect it by USB once and choose Prepare.</li></ol>
+      <button id="pair-remote" class="secondary-button">Set up remote access (USB)</button>
+      <form id="remote-host-form" class="wifi-form"><label class="field-label" for="remote-host">iPhone remote address</label><input id="remote-host" class="text-input" placeholder="100.101.102.103" autocomplete="off" spellcheck="false" /><div class="button-row"><button type="submit" class="secondary-button compact">Save address</button><button id="clear-remote-host" type="button" class="text-button">Clear</button></div></form>
+      <p id="remote-status" class="settings-note" role="status"></p>
+    </div>
     <details id="wifi-manual"><summary>Manual setup and troubleshooting</summary>
     <label class="field-label" for="wifi-phone">Your phone</label><select id="wifi-phone" class="text-input"><option value="ios">iPhone · iOS 17.4+</option><option value="android">Android · Android 11+</option></select>
     <div id="wifi-ios" class="settings-group">
@@ -522,12 +530,21 @@ function handoffPhone() {
 function renderConnections() {
   const mode = state.preferences.connection || 'usb';
   const busy = pending || state.busy, phone = handoffPhone();
-  $('#connection-options').textContent = `Connection: ${mode === 'wifi' ? 'Wi-Fi' : 'USB'} · Change`;
+  const modeLabel = mode === 'remote' ? 'Remote' : mode === 'wifi' ? 'Wi-Fi' : 'USB';
+  $('#connection-options').textContent = `Connection: ${modeLabel} · Change`;
   document.querySelectorAll('[data-connection]').forEach(button => {
     button.setAttribute('aria-pressed', String(button.dataset.connection === mode));
-    button.disabled = busy || (button.dataset.connection !== mode && Boolean(state.session) && !phone);
+    button.disabled = busy || (button.dataset.connection !== mode && Boolean(state.session) && !phone) ||
+      (button.dataset.connection === 'remote' && mode !== 'remote' && !(state.preferences.remoteHost && state.preferences.remoteUdid));
   });
-  $('#wifi-status').textContent = busy ? 'Checking the connection… Keep USB connected.' : phone ? 'Ready to switch. Ghost will check this same phone over Wi-Fi first.' : state.session?.status === 'active' && mode === 'wifi' ? 'Connected over Wi-Fi. Restore real location before returning to USB.' : state.session ? 'Retry or restore this phone’s session before switching.' : `Using ${mode === 'wifi' ? 'Wi-Fi' : 'USB'}. ${state.devices.length} phone${state.devices.length === 1 ? '' : 's'} found.`;
+  const selectedUsbIphone = state.devices.find(device => device.id === selectedDeviceId && device.platform === 'ios' && device.connection === 'usb');
+  $('#pair-remote').disabled = busy || isPreview || mode !== 'usb' || !selectedUsbIphone || Boolean(state.session);
+  if (document.activeElement !== $('#remote-host')) $('#remote-host').value = state.preferences.remoteHost || '';
+  $('#remote-status').textContent = !state.preferences.remoteUdid ? 'Not set up yet: connect the iPhone by USB and choose Set up remote access.'
+    : !state.preferences.remoteHost ? 'Set up for one iPhone. Enter its Tailscale address, then choose Remote.'
+    : mode === 'remote' ? `Using remote access at ${state.preferences.remoteHost}. ${state.devices.length ? 'iPhone reachable.' : 'iPhone not reachable — keep it on Wi-Fi with Tailscale on.'}`
+    : `Ready: choose Remote to connect to ${state.preferences.remoteHost}.`;
+  $('#wifi-status').textContent = mode === 'remote' && !busy ? (state.session ? 'Connected remotely. Restore real location before switching connections.' : `Using remote access. ${state.devices.length} phone${state.devices.length === 1 ? '' : 's'} found.`) : busy ? 'Checking the connection… Keep USB connected.' : phone ? 'Ready to switch. Ghost will check this same phone over Wi-Fi first.' : state.session?.status === 'active' && mode === 'wifi' ? 'Connected over Wi-Fi. Restore real location before returning to USB.' : state.session ? 'Retry or restore this phone’s session before switching.' : `Using ${mode === 'wifi' ? 'Wi-Fi' : 'USB'}. ${state.devices.length} phone${state.devices.length === 1 ? '' : 's'} found.`;
   $('#wifi-handoff').hidden = !phone;
   $('#switch-to-wifi').disabled = $('#wifi-prompt-switch').disabled = Boolean(busy);
   $('#wifi-prompt-android').hidden = $('#wifi-android-note').hidden = phone?.platform !== 'android';
@@ -667,6 +684,9 @@ $('#wifi-dialog').addEventListener('close', () => { $('#wifi-pair-code').value =
 document.querySelectorAll('[data-connection]').forEach(button => {
   button.onclick = () => button.dataset.connection === 'wifi' && handoffPhone() ? switchToWifi() : runOperation(() => api.setConnection(button.dataset.connection));
 });
+$('#pair-remote').onclick = () => runOperation(() => api.pairRemote(selectedDeviceId), 'Remote access is set up for this iPhone. Enter its Tailscale address next.');
+$('#remote-host-form').onsubmit = (event) => { event.preventDefault(); runOperation(() => api.updatePreferences({ remoteHost: $('#remote-host').value.trim() }), 'Remote address saved.'); };
+$('#clear-remote-host').onclick = () => runOperation(() => api.updatePreferences({ remoteHost: null }), 'Remote address cleared.');
 $('#enable-iphone-wifi').onclick = () => runOperation(() => api.connectWifi({platform: 'ios', deviceId: selectedDeviceId}), 'Wi-Fi enabled. Choose Wi-Fi above to find your iPhone.');
 $('#wifi-pair-form').onsubmit = async event => {
   event.preventDefault();

@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 export function coordinates(value) {
   if (!value || typeof value !== 'object') throw new Error('Choose a location first.');
   const { latitude, longitude } = value;
@@ -49,6 +50,13 @@ export function routingUrl(value) {
   const url = serviceUrl(value, 'OSRM routing');
   if (!url.pathname.endsWith('/')) url.pathname += '/';
   return url.href;
+}
+
+/** The iPhone's remote address: an IP literal only (no names, ports or paths). */
+export function remoteHost(value) {
+  const host = typeof value === 'string' ? value.trim() : '';
+  if (!host || host.length > 64 || !isIP(host)) throw new Error('Enter the iPhone’s remote IP address, for example its Tailscale 100.x address.');
+  return host;
 }
 
 export const DEFAULT_SPEED_MPH = 45;

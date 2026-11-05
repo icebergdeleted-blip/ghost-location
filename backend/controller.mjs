@@ -1,11 +1,12 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { place, text, geocoderUrl, routingUrl, speedMph, DEFAULT_SPEED_MPH } from './validation.mjs';
+import { place, text, geocoderUrl, routingUrl, speedMph, remoteHost, DEFAULT_SPEED_MPH } from './validation.mjs';
 import { Router, measurePath, pointAlong, speedMps } from './routing.mjs';
 
 const REPLACEABLE_SESSION_STATUSES = new Set(['unknown', 'waiting', 'error']);
 const USABLE_REPLACEMENT_STATES = new Set(['ready', 'setup-required']);
 const ROUTE_CHECKPOINT_MS = 5000;
+const CONNECTIONS = ['usb', 'wifi', 'remote'];
 const runningMessage = route => `Following the road at ${route.speedMph} mph. Sending a location every second.`;
 
 export class Controller extends EventEmitter {
@@ -29,7 +30,9 @@ export class Controller extends EventEmitter {
   async init() {
     const saved = await this.store.load();
     Object.assign(this.state, saved, { warning: this.store.warning });
-    for (const adapter of Object.values(this.adapters)) adapter.connection = this.state.preferences.connection === 'wifi' ? 'wifi' : 'usb';
+    if (!CONNECTIONS.includes(this.state.preferences.connection)) this.state.preferences.connection = 'usb';
+    for (const adapter of Object.values(this.adapters)) adapter.connection = this.state.preferences.connection;
+    this.applyRemote();
     if (this.state.session) {
       this.state.session.status = 'unknown';
       this.state.session.id ||= randomUUID();
@@ -39,6 +42,22 @@ export class Controller extends EventEmitter {
     }
     await this.restoreRoute();
     return this.scanDevices();
+  }
+  applyRemote() {
+    const { remoteHost: host = null, remoteUdid: udid = null } = this.state.preferences;
+    if (this.adapters.ios) this.adapters.ios.remote = { host, udid };
+  }
+  /** One-time USB setup for Wi-Fi and remote (Tailscale) iPhone connections. */
+  async pairRemote(id) {
+    return this.exclusive(async () => {
+      const device = this.device(id);
+      if (device.platform !== 'ios' || device.connection !== 'usb') throw new Error('Connect the iPhone by USB to set up remote access.');
+      await this.adapters.ios.pairRemote(device);
+      const previous = this.state.preferences.remoteUdid;
+      this.state.preferences.remoteUdid = device.serial;
+      try { await this.persist(); } catch (error) { this.state.preferences.remoteUdid = previous; throw error; }
+      this.applyRemote();
+    });
   }
   routeSpeed() { return this.state.preferences.routeSpeedMph ?? DEFAULT_SPEED_MPH; }
   /** Bring back a saved route after a restart, always paused; Resume is manual. */
@@ -151,7 +170,7 @@ export class Controller extends EventEmitter {
     const previous = this.state.session;
     if (!previous || !REPLACEABLE_SESSION_STATUSES.has(previous.status)) return false;
     const replacement = this.state.devices.find(device => device.id !== previous.deviceId &&
-      (previous.platform === 'ios' || (previous.connection || 'usb') === 'usb' || previous.hardwareId) && ['usb', 'wifi'].includes(device.connection) && USABLE_REPLACEMENT_STATES.has(device.state));
+      (previous.platform === 'ios' || (previous.connection || 'usb') === 'usb' || previous.hardwareId) && CONNECTIONS.includes(device.connection) && USABLE_REPLACEMENT_STATES.has(device.state));
     if (!replacement) return false;
 
     // A recovery record from another phone must not lock the newly connected
@@ -205,7 +224,10 @@ export class Controller extends EventEmitter {
     return device;
   }
   async setConnection(connection) {
-    if (!['usb', 'wifi'].includes(connection)) throw new Error('Choose USB or Wi-Fi.');
+    if (!CONNECTIONS.includes(connection)) throw new Error('Choose USB, Wi-Fi or remote.');
+    if (connection === 'remote' && (!this.state.preferences.remoteHost || !this.state.preferences.remoteUdid)) {
+      throw new Error('Set up remote access over USB and enter the iPhone’s remote address first.');
+    }
     if (connection === (this.state.preferences.connection || 'usb')) return this.snapshot();
     if (connection === 'wifi' && this.state.session?.status === 'active' && (this.state.session.connection || 'usb') === 'usb') return this.switchToWifi(this.state.session.deviceId);
     return this.exclusive(async () => {
@@ -298,6 +320,10 @@ export class Controller extends EventEmitter {
         const device = this.device(input.deviceId);
         if (device.platform !== 'ios' || device.connection !== 'usb') throw new Error('Connect and select the iPhone by USB first.');
         await this.adapters.ios.enableWifi(device);
+        // iOS 27 Wi-Fi tunnels use RemotePairing; create this computer's record while on USB.
+        await this.adapters.ios.pairRemote(device);
+        this.state.preferences.remoteUdid = device.serial; this.applyRemote();
+        await this.persist();
       } else if (input?.platform === 'android') {
         await this.adapters.android.connectWifi(input);
       } else throw new Error('Choose iPhone or Android.');
@@ -609,6 +635,19 @@ export class Controller extends EventEmitter {
     if (!input || typeof input !== 'object') throw new Error('Invalid preferences.');
     if (input.routeSpeedMph != null) speedMph(input.routeSpeedMph); // validate before changing anything
     if (input.routingUrl != null) this.state.preferences.routingUrl = routingUrl(text(input.routingUrl));
+    if (input.remoteHost !== undefined) {
+      if (input.remoteHost === null || input.remoteHost === '') {
+        if (this.state.preferences.connection === 'remote' && this.state.session) throw new Error('Restore the current location before clearing the remote address.');
+        this.state.preferences.remoteHost = null;
+      } else {
+        const host = remoteHost(input.remoteHost);
+        if (this.state.preferences.connection === 'remote' && this.state.session && host !== this.state.preferences.remoteHost) {
+          throw new Error('Restore the current location before changing the remote address.');
+        }
+        this.state.preferences.remoteHost = host;
+      }
+      this.applyRemote();
+    }
     if (input.tileSource != null) {
       if (!['online', 'mbtiles', 'folder'].includes(input.tileSource)) throw new Error('Invalid map tile source.');
       if (input.tileSource !== 'online' && (typeof input.tilePath !== 'string' || !input.tilePath || input.tilePath.length > 1024)) throw new Error('Choose an offline tile file or folder.');

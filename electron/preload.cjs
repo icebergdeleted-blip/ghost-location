@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('ghost', Object.freeze({
   connectWifi: value => invoke('connectWifi', value),
   scanDevices: () => invoke('scanDevices'),
   prepareDevice: id => invoke('prepareDevice', id),
+  pairRemote: id => invoke('pairRemote', id),
   applyLocation: point => invoke('applyLocation', point),
   stopLocation: () => invoke('stopLocation'),
   getRoute: () => invoke('getRoute'),
