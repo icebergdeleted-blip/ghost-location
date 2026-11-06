@@ -51,6 +51,8 @@ computer. Share your tailnet only with people you trust.
 ## Limits
 
 - If the computer sleeps, quits, or loses Tailscale, the phone page can't reach it.
+- Over Remote, the spoofed iPhone must be joined to a Wi-Fi network; cellular alone is refused by
+  iOS. Away from Wi-Fi, join a personal hotspot from a second phone.
 - The phone being spoofed must stay connected to Ghost. Over Remote, the phone returns to its
   real location within about a minute if that connection drops. Ghost shows a desktop alert
   and keeps retrying.

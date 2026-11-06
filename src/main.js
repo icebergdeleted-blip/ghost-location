@@ -197,7 +197,7 @@ $('#app').innerHTML = `
         <li><strong>Unplug and choose Remote</strong><span>Keep the iPhone on any Wi-Fi with Tailscale on, then choose <em>Remote</em> above.</span></li>
       </ol>
       <ul class="guide-notes">
-        <li><strong>Wi-Fi required:</strong> any network works, but the iPhone must be joined to one. Cellular alone does not work.</li>
+        <li><strong>Wi-Fi required:</strong> any network works, but the iPhone must be joined to one. Cellular alone does not work; away from Wi-Fi, join a hotspot from a second phone.</li>
         <li><strong>Stays only while connected:</strong> if the connection drops, the iPhone returns to its real location within about a minute.</li>
         <li><strong>After the iPhone restarts:</strong> plug it in once and choose <em>Prepare</em>.</li>
       </ul>

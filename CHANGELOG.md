@@ -1,6 +1,25 @@
 # Changelog
 
-## Unreleased (feature/offline-persistence)
+## 0.1.8 (pre-release)
+
+### Remote iPhone connection and phone control
+
+- Connect to an iPhone over RemotePairing on Wi-Fi, and remotely through Tailscale
+  (**Remote** mode). Set up once over USB with **Set up remote access**; **Find with
+  Tailscale** lists iPhones on the tailnet. Hardware-verified on iOS 27.0.1, including a
+  relayed path and an iPhone on a second phone's personal hotspot. Cellular alone is refused
+  by iOS, and the spoof reverts about a minute after the connection drops.
+- Pin pymobiledevice3 11.50.0; 11.12.4's RemotePairing proof is rejected by iOS 27.
+  The sidecar build now records the pinned version instead of a hard-coded one.
+- Desktop alerts when a live spoof loses or regains its connection.
+- Phone control (off by default): a map page served only on this computer's Tailscale
+  address, paired by a 6-digit code or QR link, with search, saved places, Set, Restore and
+  Open in Apple Maps. See `docs/phone-control.md`.
+- An unresolved session can move to the phone's current connection type; Set works for
+  Wi-Fi and Remote phones; long place names no longer push Restore off a phone screen.
+- macOS: declare `_remotepairing._tcp` for local-network discovery.
+
+### Offline features (first shipped in the v0.1.7-offline pre-release)
 
 - Add a manual iPhone persistence probe (`scripts/persistence-probe.mjs`,
   `sidecar/persistence_probe.py`) and `docs/persistence-findings.md`. They test

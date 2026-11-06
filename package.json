@@ -1,6 +1,6 @@
 {
   "name": "ghost-location",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "description": "Choose a place. Set your phone's location over USB or Wi-Fi.",
   "author": "Ghost contributors",
@@ -78,6 +78,7 @@
         "NSLocalNetworkUsageDescription": "Ghost connects to your trusted phone on the same Wi-Fi network to simulate locations.",
         "NSBonjourServices": [
           "_apple-mobdev2._tcp",
+          "_remotepairing._tcp",
           "_adb-tls-connect._tcp",
           "_adb-tls-pairing._tcp"
         ]

@@ -1,6 +1,8 @@
 # iPhone Wi-Fi and remote (Tailscale) findings
 
-Hardware: iPhone17,3 on iOS 27.0.1, Windows 11 host, pymobiledevice3 11.12.4. Tested 2026-11-05.
+Hardware: iPhone17,3 on iOS 27.0.1, Windows 11 host. Tested 2026-11-05 and 2026-11-06.
+The network probes and Wi-Fi fixes below used pymobiledevice3 11.12.4. The RemotePairing results
+used 11.50.0, which Ghost now pins.
 All probes were read-only unless a row says a location was set. Each set was followed by a clear.
 
 ## Network paths, compared at the same moment
@@ -43,10 +45,11 @@ Ghost's Wi-Fi and remote connections now tunnel through RemotePairing:
 | Tailscale 100.x, phone on the same hotspot | tunnel in 1.5 s; 7/7 acks; clear sent |
 | Tailscale 100.x, phone on campus Wi-Fi, relayed (DERP), unplugged | tunnel in 3.6 s; 7/7 acks (about 0.6 s RTT); clear sent |
 | Tailscale, phone on cellular only (Wi-Fi off) | ports 49152 and 62078 refused; iOS switches the services off |
+| Tailscale, phone joined to another phone's personal hotspot (that phone on mobile data) | Ghost connected in Remote mode; Set moved the iPhone and Restore returned it (user-tested 2026-11-06) |
 | Ghost Controller in remote mode (`scripts/remote-e2e-check.mjs`) | found on the first scan; active in 1.5 s; 8 refresh acks in 8 s; Restore cleared the session |
 
 Limits: the iPhone must be joined to some Wi-Fi network (any network; it doesn't have to match
-the computer's). The developer image needs one USB Prepare after each iPhone restart. The spoof
+the computer's). Away from Wi-Fi, a personal hotspot from a second phone on mobile data works. The developer image needs one USB Prepare after each iPhone restart. The spoof
 lasts only while the tunnel is up.
 
 ## Earlier blocker (superseded)
