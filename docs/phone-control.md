@@ -8,14 +8,30 @@ else, for example at home. It's off by default.
 1. Install Tailscale on the computer and on your phone, signed in to the same account.
 2. In Ghost, open **Settings › Phone control** and turn on **Control Ghost from your phone**.
    If Windows asks whether Ghost may use the network, allow it on private networks.
-3. On your phone, open the address shown (for example `http://100.79.113.80:7420`).
-4. In Ghost, choose **Pair a phone** and enter the 6-digit code on your phone. The code works
-   once and expires after 5 minutes. The phone stays signed in for 30 days.
+3. In Ghost, choose **Pair a phone** and scan the QR code with the iPhone camera. The page opens
+   and pairs in one step. You can also open the address shown (your computer's Tailscale name,
+   for example `http://laptop.tailnet.ts.net:7420`, or its `100.x` IP) and type the 6-digit
+   code. A code works once and expires after 5 minutes. The phone stays signed in for 30 days.
+4. Optional: in Safari, choose Share › **Add to Home Screen** so Ghost opens like an app.
 
-The phone page shows the current status. You can tap the map, enter coordinates, or pick a saved
-place, then choose **Set location** or **Restore real location**. These use the same Set and
-Restore actions as the desktop app. The phone being controlled must still be connected to Ghost
-(USB, Wi-Fi, or Remote).
+The phone page is a full-screen map. You can search at the top (through Ghost's search provider),
+tap the map, or tap a saved-place chip. Then choose **Set location** or **Restore**. These use the
+same Set and Restore actions as the desktop app. **Open in Apple Maps** shows the chosen spot in
+the Apple Maps app. ◎ jumps to where the phone currently appears. The phone being controlled must
+still be connected to Ghost (USB, Wi-Fi, or Remote).
+
+### Apple Maps as the map?
+
+Apple's web map (MapKit JS) needs a paid Apple Developer account, a signed token, and a
+registered HTTPS website, so this private page uses OpenStreetMap. Use **Open in Apple Maps** to
+check a spot in Apple's own app.
+
+### A cleaner HTTPS address (optional)
+
+Tailscale can put an HTTPS address in front of Ghost, without the `:7420`, using
+`tailscale serve`. This changes your Tailscale setup, so Ghost doesn't do it for you. See
+Tailscale's documentation for `tailscale serve`. If you use it, the address it gives must be
+added to Ghost's allowed names first. That isn't supported yet.
 
 ## Safety model
 

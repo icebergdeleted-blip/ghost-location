@@ -46,3 +46,20 @@ export async function findTailscaleApplePeers({ runner = run, platform = process
   if (result.code !== 0) throw new Error('Tailscale is not running on this computer. Open it and sign in, or type the address.');
   return parseApplePeers(result.stdout);
 }
+
+/** This computer's MagicDNS name (e.g. "laptop.tailnet.ts.net"), or null. Read-only `status --json`. */
+export async function findSelfDnsName({ runner = run, platform = process.platform, env = process.env, exists = existsSync } = {}) {
+  const executable = tailscaleCandidates(platform, env).find(candidate => exists(candidate));
+  if (!executable) return null;
+  const result = await runner(executable, ['status', '--json'], { timeoutMs: 8000, maxOutputBytes: 4 * 1024 * 1024 });
+  if (result.code !== 0) return null;
+  return parseSelfDnsName(result.stdout);
+}
+
+export function parseSelfDnsName(json) {
+  let data;
+  try { data = JSON.parse(json); } catch { return null; }
+  const name = String(data?.Self?.DNSName || '').replace(/\.$/, '').toLowerCase();
+  // A plain DNS name only: it is shown to the user and compared with the Host header.
+  return /^(?=.{4,200}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(name) ? name : null;
+}

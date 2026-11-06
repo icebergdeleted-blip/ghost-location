@@ -8,6 +8,7 @@ import {
   ChevronLeft,
 } from 'lucide';
 import { createPreviewBridge } from './preview.js';
+import qrcode from 'qrcode-generator';
 
 const isPreview = !window.ghost;
 const detectedHost = /Windows/i.test(navigator.userAgent) ? 'windows' : 'mac';
@@ -241,7 +242,9 @@ $('#app').innerHTML = `
       <div id="phone-control-details" hidden>
         <p class="settings-note">On your phone (with Tailscale on), open:</p>
         <div class="inline-form"><code id="phone-control-url" class="url-box"></code><button id="phone-control-copy" type="button" class="text-button">Copy</button></div>
-        <div class="inline-form"><button id="phone-control-pair" type="button" class="secondary-button compact">Pair a phone</button><span id="phone-control-code" class="pair-code" aria-live="polite"></span></div>
+        <p id="phone-control-ip" class="settings-note"></p>
+        <div class="inline-form"><button id="phone-control-pair" type="button" class="secondary-button compact">Pair a phone</button></div>
+        <div id="phone-control-qr-box" class="qr-box" hidden><div id="phone-control-qr" class="qr" role="img" aria-label="QR code that opens Ghost on your phone and pairs it"></div><div><strong>Scan with your iPhone camera</strong><small>It opens Ghost and pairs in one step. Or type this code on the phone:</small><span id="phone-control-code" class="pair-code" aria-live="polite"></span></div></div>
         <p id="phone-control-info" class="settings-note"></p>
         <button id="phone-control-revoke" type="button" class="text-button danger-text">Sign out all phones</button>
       </div>
@@ -697,9 +700,16 @@ function renderPhoneControl(status = phoneControlStatus) {
   $('#phone-control-toggle').disabled = isPreview || pending;
   $('#phone-control-details').hidden = !on;
   $('#phone-control-url').textContent = phoneControlStatus.url || '';
+  $('#phone-control-ip').textContent = phoneControlStatus.ipUrl && phoneControlStatus.ipUrl !== phoneControlStatus.url ? `If that name doesn’t open, use ${phoneControlStatus.ipUrl}` : '';
   const pairing = phoneControlStatus.pairing;
   const minutes = pairing ? Math.max(1, Math.ceil((pairing.expiresAt - Date.now()) / 60000)) : 0;
   $('#phone-control-code').textContent = pairing ? `${pairing.code.slice(0, 3)} ${pairing.code.slice(3)} · expires in ${minutes} min` : '';
+  $('#phone-control-qr-box').hidden = !pairing;
+  if (pairing && $('#phone-control-qr').dataset.url !== pairing.url) {
+    const qr = qrcode(0, 'M'); qr.addData(pairing.url); qr.make();
+    $('#phone-control-qr').innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+    $('#phone-control-qr').dataset.url = pairing.url;
+  }
   $('#phone-control-info').textContent = on ? `${phoneControlStatus.phones || 0} phone${phoneControlStatus.phones === 1 ? '' : 's'} paired. Commands from the phone work like the buttons here.` : '';
   $('#phone-control-error').textContent = state.preferences.phoneControlEnabled && !on ? (phoneControlStatus.error || 'Phone control is waiting for Tailscale. Turn it off and on again once Tailscale is connected.') : '';
 }

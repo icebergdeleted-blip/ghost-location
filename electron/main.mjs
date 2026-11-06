@@ -14,6 +14,7 @@ import { WakeLock } from '../backend/power.mjs';
 import { TileSource } from '../backend/tiles.mjs';
 import { ConnectionAlerts } from '../backend/alerts.mjs';
 import { PhoneControl } from '../backend/phone-control.mjs';
+import { findSelfDnsName } from '../backend/tailscale.mjs';
 
 const rootPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const devUrl = !app.isPackaged && process.env.GHOST_DEV_URL === 'http://127.0.0.1:5173' ? process.env.GHOST_DEV_URL : null;
@@ -79,7 +80,11 @@ async function boot() {
   const android = new AndroidAdapter({ ...options, ...callbacks });
   controller = new Controller({ adapters: { ios, android }, network: wifiStatus, store: new Store(path.join(app.getPath('userData'), 'settings.json')),
     routeJournal: new RouteJournal(path.join(app.getPath('userData'), 'route.json')) });
-  phoneControl = new PhoneControl({ controller, dataPath: path.join(app.getPath('userData'), 'phone-control.json') });
+  // Development builds may use another port (e.g. checks running beside your own Ghost); releases always use 7420.
+  const devPort = !app.isPackaged && /^\d{4,5}$/.test(process.env.GHOST_PHONE_CONTROL_PORT || '') ? Number(process.env.GHOST_PHONE_CONTROL_PORT) : undefined;
+  phoneControl = new PhoneControl({ controller, dataPath: path.join(app.getPath('userData'), 'phone-control.json'), ...(devPort ? { port: devPort } : {}),
+    dnsName: () => findSelfDnsName().catch(() => null),
+    search: query => { geocoder.configure(controller.state.preferences.geocoderUrl || 'https://photon.komoot.io/api/'); return geocoder.search(query); } });
   phoneControl.on('paired', () => {
     showAlert({ kind: 'paired', title: 'Phone paired with Ghost', body: 'A phone can now control locations over Tailscale. Remove access anytime in Settings › Phone control.' });
     if (window && !window.isDestroyed()) window.webContents.send('ghost:phone-control', phoneControl.status());

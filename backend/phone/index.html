@@ -3,42 +3,74 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
   <meta name="color-scheme" content="light dark" />
+  <meta name="theme-color" content="#087bff" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Ghost" />
   <title>Ghost</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/icon.png" />
   <link rel="stylesheet" href="/vendor/leaflet.css" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <header><span class="brand">Ghost</span><span id="pill" class="pill">Connecting…</span></header>
-
-  <main id="pair-view" hidden>
-    <h1>Pair this phone</h1>
-    <p>On the computer, open Ghost › Settings › Phone control and choose <strong>Pair a phone</strong>. Enter the 6-digit code here.</p>
+  <section id="pair-view" class="pair" hidden>
+    <img src="/icon.png" alt="" class="pair-icon" />
+    <h1>Pair with Ghost</h1>
+    <p>On your computer, open Ghost › Settings › Phone control › <strong>Pair a phone</strong>. Scan the QR code with your camera, or type the 6-digit code here.</p>
     <form id="pair-form">
-      <input id="pair-code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="123456" required aria-label="Pairing code" />
+      <input id="pair-code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="••••••" required aria-label="Pairing code" />
       <button type="submit">Pair</button>
     </form>
     <p id="pair-error" class="error" role="alert"></p>
-  </main>
+  </section>
 
-  <main id="control-view" hidden>
-    <section id="status" class="card" aria-live="polite"></section>
-    <div id="map" aria-label="Map. Tap to choose a point."></div>
-    <section class="card">
-      <h2>Choose a place</h2>
-      <p class="hint">Tap the map, pick a saved place, or enter coordinates.</p>
-      <div class="coords">
-        <label>Latitude<input id="lat" inputmode="decimal" placeholder="40.68925" /></label>
-        <label>Longitude<input id="lon" inputmode="decimal" placeholder="-74.04450" /></label>
+  <section id="control-view" hidden>
+    <div id="map" aria-label="Map. Tap to choose a place."></div>
+
+    <div class="top">
+      <form id="search-form" class="search" role="search">
+        <input id="search" type="search" placeholder="Search places or paste lat, lon" autocomplete="off" enterkeyhint="search" aria-label="Search places" />
+      </form>
+      <div id="results" class="results" hidden></div>
+    </div>
+
+    <div class="fabs">
+      <button id="locate" class="fab" type="button" aria-label="Show the phone's current spoofed spot" title="Current spoofed spot">◎</button>
+      <button id="zoom-in" class="fab" type="button" aria-label="Zoom in">+</button>
+      <button id="zoom-out" class="fab" type="button" aria-label="Zoom out">−</button>
+    </div>
+
+    <div id="sheet" class="sheet">
+      <div class="handle" aria-hidden="true"></div>
+      <div class="status-row"><span id="pill" class="pill">Connecting…</span><span id="status-text" class="status-text"></span></div>
+
+      <div id="chosen" class="chosen" hidden>
+        <div><strong id="chosen-label">Dropped pin</strong><small id="chosen-coords"></small></div>
+        <a id="apple-maps" class="apple" href="#" target="_blank" rel="noreferrer">Open in Apple Maps</a>
       </div>
-      <select id="saved" aria-label="Saved places"><option value="">Saved places…</option></select>
-      <button id="set" class="primary" type="button">Set location</button>
-      <button id="restore" class="restore" type="button">Restore real location</button>
-      <p id="error" class="error" role="alert"></p>
-    </section>
-    <p class="foot">Commands go to Ghost on your computer, which talks to the phone. If that connection drops, the phone returns to its real location within about a minute.</p>
-  </main>
+      <p id="hint" class="hint">Tap the map, search, or pick a saved place.</p>
+
+      <div class="actions">
+        <button id="set" class="primary" type="button" disabled>Set location</button>
+        <button id="restore" class="restore" type="button" disabled>Restore</button>
+      </div>
+      <p id="message" class="message" role="status"></p>
+
+      <div id="saved" class="chips" aria-label="Saved places"></div>
+
+      <details class="coords">
+        <summary>Enter coordinates</summary>
+        <form id="coords-form">
+          <input id="lat" inputmode="decimal" placeholder="Latitude" aria-label="Latitude" />
+          <input id="lon" inputmode="decimal" placeholder="Longitude" aria-label="Longitude" />
+          <button type="submit">Show</button>
+        </form>
+      </details>
+    </div>
+  </section>
   <script src="/vendor/leaflet.js"></script>
   <script src="/app.js"></script>
 </body>

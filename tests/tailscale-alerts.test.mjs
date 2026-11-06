@@ -95,3 +95,10 @@ test('a dropped remote session keeps retrying and resumes the same phone and poi
   assert.equal(sets.length, 2);
   assert.deepEqual({ connection: sets[1].connection, latitude: sets[1].latitude, longitude: sets[1].longitude, reconnecting: sets[1].reconnecting }, { connection: 'remote', latitude: 1, longitude: 2, reconnecting: true });
 });
+
+test('the computer’s MagicDNS name is read safely', async () => {
+  const { parseSelfDnsName } = await import('../backend/tailscale.mjs');
+  assert.equal(parseSelfDnsName(JSON.stringify({ Self: { DNSName: 'AlexRVivobook.tail1234.ts.net.' } })), 'alexrvivobook.tail1234.ts.net');
+  for (const bad of ['', 'x', 'evil.com:80', 'a b.ts.net', '<script>.ts.net']) assert.equal(parseSelfDnsName(JSON.stringify({ Self: { DNSName: bad } })), null, bad);
+  assert.equal(parseSelfDnsName('{'), null);
+});

@@ -1,0 +1,11 @@
+{
+  "name": "Ghost",
+  "short_name": "Ghost",
+  "description": "Set or restore your phone's location through Ghost on your computer.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f5f7",
+  "theme_color": "#087bff",
+  "icons": [{ "src": "/icon.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any" }]
+}

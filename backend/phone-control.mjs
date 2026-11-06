@@ -47,6 +47,8 @@ const sameText = (a, b) => {
 
 const STATIC = {
   '/': ['index.html', 'text/html; charset=utf-8'],
+  '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json; charset=utf-8'],
+  '/icon.png': ['icon.png', 'image/png'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
 };
@@ -64,17 +66,24 @@ const VENDOR = {
  * - Commands go through the same Controller methods as the desktop app.
  */
 export class PhoneControl extends EventEmitter {
-  constructor({ controller, dataPath, port = PHONE_CONTROL_PORT, address = localTailscaleIPv4, now = Date.now, allowAddress = isTailnetAddress } = {}) {
+  constructor({ controller, dataPath, port = PHONE_CONTROL_PORT, address = localTailscaleIPv4, now = Date.now, allowAddress = isTailnetAddress,
+    dnsName = async () => null, search = null } = {}) {
     super();
-    Object.assign(this, { controller, dataPath, port, address, now, allowAddress });
-    this.server = null; this.host = null; this.error = null;
+    Object.assign(this, { controller, dataPath, port, address, now, allowAddress, dnsName, search });
+    this.server = null; this.host = null; this.error = null; this.name = null; this.lastSearchAt = -Infinity;
     this.code = null; this.sessions = []; this.loaded = false; this.lastCommandAt = -Infinity;
   }
 
+  /** Host headers this server answers to: the Tailscale IP and, if known, the MagicDNS name. */
+  allowedHosts() { return [this.host, this.name].filter(Boolean).map(host => `${host}:${this.port}`); }
+
   status() {
+    const url = this.server ? `http://${this.name || this.host}:${this.port}` : null;
+    const pairing = this.code && this.code.expiresAt > this.now() ? this.code : null;
     return {
-      enabled: Boolean(this.server), url: this.server ? `http://${this.host}:${this.port}` : null, error: this.error,
-      pairing: this.code && this.code.expiresAt > this.now() ? { code: this.code.value, expiresAt: this.code.expiresAt } : null,
+      enabled: Boolean(this.server), url, ipUrl: this.server ? `http://${this.host}:${this.port}` : null, error: this.error,
+      // Scanning this opens the page and pairs in one step. The code is in the URL fragment, which browsers never send to servers.
+      pairing: pairing ? { code: pairing.value, expiresAt: pairing.expiresAt, url: `${url}/#pair=${pairing.value}` } : null,
       phones: this.sessions.length,
     };
   }
@@ -113,6 +122,7 @@ export class PhoneControl extends EventEmitter {
         throw new Error(this.error);
       });
     this.server = server; this.host = host; this.error = null;
+    try { this.name = await this.dnsName(); } catch { this.name = null; }
     this.port = server.address().port; // tests listen on port 0
     return this.status();
   }
@@ -143,7 +153,7 @@ export class PhoneControl extends EventEmitter {
     return {
       'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
       'X-Frame-Options': 'DENY', 'Cross-Origin-Resource-Policy': 'same-origin',
-      'Content-Security-Policy': "default-src 'self'; img-src 'self' data: https://tile.openstreetmap.org; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+      'Content-Security-Policy': "default-src 'self'; img-src 'self' data: https://tile.openstreetmap.org; style-src 'self'; script-src 'self'; connect-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
     };
   }
 
@@ -173,11 +183,11 @@ export class PhoneControl extends EventEmitter {
   }
 
   async handle(req, res) {
-    const origin = `http://${this.host}:${this.port}`;
-    // Only tailnet peers, and only requests addressed to this exact host (blocks DNS rebinding).
-    if (!this.allowAddress(req.socket.remoteAddress) || req.headers.host !== `${this.host}:${this.port}`) {
+    // Only tailnet peers, and only requests addressed to this computer's own names (blocks DNS rebinding).
+    if (!this.allowAddress(req.socket.remoteAddress) || !this.allowedHosts().includes(req.headers.host)) {
       res.writeHead(403, this.headers('text/plain; charset=utf-8')); res.end('Forbidden'); return;
     }
+    const origin = `http://${req.headers.host}`;
     const url = new URL(req.url, origin);
     if (req.method === 'GET' && STATIC[url.pathname]) return this.file(res, path.join(here, 'phone', STATIC[url.pathname][0]), STATIC[url.pathname][1]);
     if (req.method === 'GET' && VENDOR[url.pathname]) return this.file(res, require.resolve(VENDOR[url.pathname][0]), VENDOR[url.pathname][1]);
@@ -187,6 +197,7 @@ export class PhoneControl extends EventEmitter {
       if (req.method === 'POST' && url.pathname === '/api/pair') return await this.pair(req, res);
       if (!this.authorized(req)) { this.json(res, 401, { error: 'Pair this phone first.' }); return; }
       if (req.method === 'GET' && url.pathname === '/api/state') { this.json(res, 200, this.publicState()); return; }
+      if (req.method === 'GET' && url.pathname === '/api/search') { this.json(res, 200, await this.searchPlaces(url.searchParams.get('q'))); return; }
       if (req.method === 'POST' && (url.pathname === '/api/set' || url.pathname === '/api/restore')) {
         const input = await this.body(req);
         const point = url.pathname === '/api/set' ? place(input) : null; // validate before using a command slot
@@ -225,6 +236,20 @@ export class PhoneControl extends EventEmitter {
     this.json(res, 200, { paired: true }, {
       'Set-Cookie': `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_MAX_AGE_S}`,
     });
+  }
+
+  async searchPlaces(query) {
+    if (!this.search) throw Object.assign(new Error('Search is not available.'), { status: 404 });
+    if (typeof query !== 'string' || query.trim().length < 2 || query.length > 200) throw new Error('Type at least two characters.');
+    if (this.now() - this.lastSearchAt < COMMAND_GAP_MS) throw Object.assign(new Error('Searching too fast. Try again in a moment.'), { status: 429 });
+    this.lastSearchAt = this.now();
+    const results = await this.search(query.trim());
+    const clean = [];
+    for (const item of Array.isArray(results) ? results : []) {
+      try { const { label, latitude, longitude } = place(item); clean.push({ label, latitude, longitude }); } catch { /* skip invalid result */ }
+      if (clean.length === 6) break;
+    }
+    return clean;
   }
 
   publicState() {

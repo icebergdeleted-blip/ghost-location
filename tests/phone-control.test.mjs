@@ -142,3 +142,44 @@ test('no phone connected to Ghost gives a clear error instead of a command', asy
   assert.match((await f.call('POST', '/api/set', { latitude: 1, longitude: 2 })).json.error, /No phone is connected/);
   assert.deepEqual(f.controller.calls, []);
 });
+
+test('the MagicDNS name works alongside the IP; other names are still refused; QR link carries the code in the fragment', async t => {
+  const f = await fixture(t, { dnsName: async () => 'laptop.tail1234.ts.net' });
+  const status = f.control.status();
+  assert.equal(status.url, `http://laptop.tail1234.ts.net:${f.control.port}`);
+  assert.equal(status.ipUrl, `http://127.0.0.1:${f.control.port}`);
+  assert.equal((await f.call('GET', '/', undefined, { Host: `laptop.tail1234.ts.net:${f.control.port}` })).status, 200);
+  assert.equal((await f.call('GET', '/', undefined, { Host: `evil.ts.net:${f.control.port}` })).status, 403);
+  const { pairing } = f.control.newPairingCode();
+  assert.equal(pairing.url, `${status.url}/#pair=${pairing.code}`);
+  const named = `http://laptop.tail1234.ts.net:${f.control.port}`;
+  const paired = await f.call('POST', '/api/pair', { code: pairing.code }, { Host: `laptop.tail1234.ts.net:${f.control.port}`, Origin: named });
+  assert.equal(paired.status, 200, 'pairing through the friendly name');
+  assert.equal((await f.call('POST', '/api/restore', {}, { Host: `laptop.tail1234.ts.net:${f.control.port}`, Origin: `http://127.0.0.1:${f.control.port}` })).status, 403,
+    'Origin must match the host actually used');
+  assert.equal((await f.call('GET', '/manifest.webmanifest')).status, 200);
+  assert.equal((await f.call('GET', '/icon.png')).headers['content-type'], 'image/png');
+});
+
+test('search goes through Ghost’s geocoder: paired only, validated, rate-limited, results cleaned', async t => {
+  const queries = [];
+  const f = await fixture(t, { search: async q => { queries.push(q); return [
+    { label: 'Statue of Liberty', latitude: 40.689247, longitude: -74.044502, extra: 'dropped' },
+    { label: 'bad', latitude: 999, longitude: 0 },
+  ]; } });
+  assert.equal((await f.call('GET', '/api/search?q=liberty')).status, 401);
+  await f.call('POST', '/api/pair', { code: f.control.newPairingCode().pairing.code });
+  assert.match((await f.call('GET', '/api/search?q=a')).json.error, /two characters/);
+  const result = await f.call('GET', '/api/search?q=%20liberty%20');
+  assert.deepEqual(result.json, [{ label: 'Statue of Liberty', latitude: 40.689247, longitude: -74.044502 }], 'invalid results are dropped, extra fields removed');
+  assert.equal((await f.call('GET', '/api/search?q=liberty')).status, 429, 'one search per second');
+  f.advance(1001);
+  assert.equal((await f.call('GET', '/api/search?q=liberty')).status, 200);
+  assert.deepEqual(queries, ['liberty', 'liberty']);
+});
+
+test('search returns label and coordinates only', async t => {
+  const f = await fixture(t, { search: async () => [{ label: 'Statue of Liberty', latitude: 40.689247, longitude: -74.044502, osm: 'x' }] });
+  await f.call('POST', '/api/pair', { code: f.control.newPairingCode().pairing.code });
+  assert.deepEqual((await f.call('GET', '/api/search?q=liberty')).json, [{ label: 'Statue of Liberty', latitude: 40.689247, longitude: -74.044502 }]);
+});
