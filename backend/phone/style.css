@@ -30,22 +30,25 @@ button:disabled { opacity: .45; cursor: default; }
 .fabs { position: absolute; z-index: 1000; right: 10px; top: calc(70px + env(safe-area-inset-top)); display: grid; gap: 8px; }
 .fab { width: 44px; height: 44px; border: 0; border-radius: 12px; background: var(--card); box-shadow: var(--shadow); font-size: 22px; line-height: 1; }
 
-.sheet { position: absolute; z-index: 1000; left: 0; right: 0; bottom: 0; max-height: 62%; overflow-y: auto; padding: 8px 16px calc(16px + env(safe-area-inset-bottom)); background: var(--card); border-radius: 22px 22px 0 0; box-shadow: 0 -6px 30px rgba(0,0,0,.16); display: grid; gap: 10px; }
+.sheet { position: absolute; z-index: 1000; left: 0; right: 0; bottom: 0; max-height: 62%; overflow-y: auto; padding: 8px 16px calc(16px + env(safe-area-inset-bottom)); background: var(--card); border-radius: 22px 22px 0 0; box-shadow: 0 -6px 30px rgba(0,0,0,.16); display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; overflow-x: hidden; }
+/* Long place names must shrink with ellipses, never widen the sheet and push Restore off screen. */
+.sheet > * { min-width: 0; }
 .handle { width: 40px; height: 5px; border-radius: 3px; background: var(--line); margin: 0 auto 2px; }
 .status-row { display: flex; align-items: center; gap: 10px; min-height: 28px; }
 .pill { flex: none; font-size: 12.5px; font-weight: 650; padding: 4px 10px; border-radius: 999px; background: var(--line); }
 .pill.live { background: var(--green); color: #fff; }
 .pill.warn { background: var(--amber); color: #fff; }
-.status-text { color: var(--muted); font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-text { flex: 1; min-width: 0; color: var(--muted); font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chosen { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .chosen > div { min-width: 0; display: grid; }
 .chosen strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chosen small { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 .apple { flex: none; color: var(--blue); font-size: 14px; font-weight: 600; text-decoration: none; }
 .hint { margin: 0; color: var(--muted); font-size: 14px; }
-.actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+.actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+.actions .primary { min-width: 0; padding: 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .restore { min-height: 52px; padding: 0 18px; border: 1px solid var(--line); border-radius: 14px; background: none; color: var(--red); font-weight: 650; }
-.message { margin: 0; min-height: 1.2em; font-size: 14px; color: var(--muted); }
+.message { margin: 0; overflow-wrap: anywhere; min-height: 1.2em; font-size: 14px; color: var(--muted); }
 .message.error, .error { color: var(--red); }
 .chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
 .chips:empty { display: none; }
@@ -55,3 +58,11 @@ button:disabled { opacity: .45; cursor: default; }
 #coords-form input { min-height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--solid); font-size: 16px; }
 #coords-form button { border: 0; border-radius: 12px; padding: 0 14px; background: var(--line); font-weight: 600; }
 .leaflet-control-attribution { font-size: 10px; }
+
+/* Phones held sideways: the sheet becomes a side panel so the map stays usable. */
+@media (orientation: landscape) and (max-height: 520px) {
+  .top { right: auto; width: min(380px, 45vw); left: calc(10px + env(safe-area-inset-left)); }
+  .sheet { left: calc(10px + env(safe-area-inset-left)); right: auto; width: min(380px, 45vw); top: calc(68px + env(safe-area-inset-top)); bottom: calc(10px + env(safe-area-inset-bottom)); max-height: none; align-content: start; border-radius: 18px; padding-bottom: 12px; }
+  .sheet .handle { display: none; }
+  .fabs { top: calc(10px + env(safe-area-inset-top)); right: calc(10px + env(safe-area-inset-right)); }
+}
