@@ -1,12 +1,13 @@
 # Ghost
 
-A small Electron app for setting a fixed phone location or following a road route over USB or Wi-Fi. Search for a
+A small Electron app for setting a fixed phone location or following a road route over USB, Wi-Fi, or
+(iPhone) remotely through Tailscale. Search for a
 place, drop a pin, or enter coordinates, then explicitly apply it to your selected
 phone. Windows and macOS share one interface and use the appropriate iPhone or
 Android adapter.
 
-Current version: **0.1.7**. See [CHANGELOG.md](CHANGELOG.md) for the onboarding,
-interface, Android cleanup, Windows packaging, recovery-record, and reconnection changes.
+Current version: **0.1.8** (pre-release). It adds remote iPhone connections, phone control from a
+browser, and offline maps and routing. See [CHANGELOG.md](CHANGELOG.md).
 
 ![Ghost following an example road route in Chicago](docs/images/ghost-route.png)
 
@@ -14,7 +15,8 @@ interface, Android cleanup, Windows packaging, recovery-record, and reconnection
 
 ## Download and install
 
-Get [Ghost 0.1.7 for Mac or Windows](https://github.com/Blueturboguy07/ghost-location/releases/tag/v0.1.7).
+Get the [Ghost 0.1.8 pre-release for Mac or Windows](https://github.com/icebergdeleted-blip/ghost-location/releases/tag/v0.1.8-remote).
+The last upstream release is [0.1.7](https://github.com/Blueturboguy07/ghost-location/releases/tag/v0.1.7).
 Follow the [setup guide](SETUP.md) for Mac → iPhone, Windows → iPhone, Mac → Android, or Windows → Android, or use [Publik's guided install](https://publikhq.com/ghost/install).
 
 The downloads include the phone runtimes. No programming tools or Ghost account are needed. These early releases are unsigned; the guide explains opening them and the limits of current device testing.
@@ -30,6 +32,9 @@ The downloads include the phone runtimes. No programming tools or Ghost account 
 - Saved places and recent selections stored locally.
 - A one-click USB → Wi-Fi handoff keeps the current location and resumes routes. Ghost offers it after a working USB session when the computer has Wi-Fi. Android 11+ also supports cable-free pairing.
 - iPhone location simulation through a bundled pymobiledevice3 sidecar.
+- Remote iPhone connection through Tailscale after a one-time USB setup; see [Remote iPhone and phone control](#remote-iphone-and-phone-control).
+- Optional phone control: set or restore locations from your phone's browser over Tailscale ([docs/phone-control.md](docs/phone-control.md)).
+- Desktop alerts when a live location loses or regains its connection.
 - Android location simulation through bundled ADB and Appium Settings.
 - Ongoing fixed-location updates and same-phone reconnection while Ghost stays open.
 - Automatic stale recovery-record cleanup when a different usable USB phone appears.
@@ -75,6 +80,25 @@ cable, and approve the computer's RSA prompt. Ghost's explicit Prepare action
 installs Appium Settings, grants location access, and selects it as the mock-location
 provider. Follow any additional device-specific prompts. Some Windows phones need
 the manufacturer's ADB USB driver. No root is required by this approach.
+
+## Remote iPhone and phone control
+
+**Remote (iPhone, iOS 17.4+):** with Tailscale on the computer and the iPhone, plug the
+iPhone in once and choose **Set up remote access** on the Connection screen. Then use
+**Find with Tailscale** (or type the iPhone's `100.x` address), unplug, and choose **Remote**.
+Limits, measured on iOS 27.0.1:
+
+- The iPhone must be joined to a Wi-Fi network (any network). iOS refuses the connection on
+  cellular alone. Away from Wi-Fi, a personal hotspot from a second phone works.
+- The location lasts only while connected. If the connection drops, the iPhone returns to its
+  real location within about a minute. Ghost alerts you and keeps retrying.
+- After each iPhone restart, plug it in once and choose **Prepare**.
+
+**Phone control** (off by default, Settings › Phone control) serves a map page only on this
+computer's Tailscale address. Pair a phone with a QR code or 6-digit code, then search, pick a
+saved place, **Set location**, or **Restore**. The computer must stay awake with Ghost open. See
+[docs/phone-control.md](docs/phone-control.md) for setup and the safety model, and
+[docs/wifi-remote-findings.md](docs/wifi-remote-findings.md) for the hardware results.
 
 ## Session behavior
 
@@ -207,8 +231,8 @@ device runtimes. Release installers are unsigned. Signing/notarization credentia
 for a trusted macOS launch and a recognized Windows publisher.
 No publishing or repository upload is performed by these commands.
 
-For v0.1.7, a macOS arm64 build produces `Ghost-0.1.7-mac-arm64.dmg` and
-`Ghost-0.1.7-mac-arm64.zip` in `release/`.
+For v0.1.8, a macOS arm64 build produces `Ghost-0.1.8-mac-arm64.dmg` and
+`Ghost-0.1.8-mac-arm64.zip` in `release/`.
 
 ### Native CI builds
 
@@ -279,4 +303,4 @@ before claiming all four connections are verified.
 
 GPL-3.0-or-later. See LICENSE and THIRD_PARTY_NOTICES.md.
 
-For wireless setup, see [the Wi-Fi guide](SETUP.md#connect-over-the-same-wi-fi-network-017). Wi-Fi support is implemented and covered by automated tests; physical phone validation is still needed.
+For wireless setup, see [the Wi-Fi guide](SETUP.md#connect-over-the-same-wi-fi-network-017). iPhone Wi-Fi and Remote were checked on one iPhone (iOS 27.0.1); Android Wi-Fi still needs physical phone validation.
