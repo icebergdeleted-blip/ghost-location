@@ -320,7 +320,7 @@ class Bridge:
         return session
 
     def session_usable(self, session):
-        # _closed is pinned 11.12.4's immediate close flag; wait_disconnected()
+        # _closed is the pinned pymobiledevice3's immediate DTX close flag; wait_disconnected()
         # only completes after socket/channel cleanup, which can take seconds.
         return (self.session is session and session.get("valid", True) and
                 not getattr(getattr(session.get("dvt"), "dtx", None), "_closed", False) and

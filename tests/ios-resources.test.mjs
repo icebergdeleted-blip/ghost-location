@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'nod
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { supportsArchitecture, validateResources, beforePack } from '../scripts/check-resources.mjs';
+import { supportsArchitecture, validateResources, beforePack, pinnedIosVersion } from '../scripts/check-resources.mjs';
 
 function macho(cpu) {
   const bytes = Buffer.alloc(64);
@@ -63,4 +63,17 @@ test('an empty iOS resource directory cannot pass packaging checks; modified APK
 test('electron-builder actual target is rejected when it differs from the native host', async () => {
   const platform = process.platform === 'win32' ? 'darwin' : 'win32';
   await assert.rejects(beforePack({ electronPlatformName: platform, arch: 1, packager: { projectDir: process.cwd() } }), /matching native host/);
+});
+
+test('the sidecar build records the pinned pymobiledevice3 version, never a hard-coded one', () => {
+  assert.equal(pinnedIosVersion('# license\npymobiledevice3==11.50.0\n'), '11.50.0');
+  assert.equal(pinnedIosVersion('# license\r\npymobiledevice3==11.50.0\r\n'), '11.50.0');
+  assert.equal(pinnedIosVersion('pymobiledevice3>=11.50.0\n'), null);
+  assert.equal(pinnedIosVersion('other==1.0\n'), null);
+  const pinned = pinnedIosVersion(readFileSync(path.join(process.cwd(), 'sidecar/requirements.txt'), 'utf8'));
+  assert.match(pinned, /^\d+\.\d+\.\d+$/);
+  const bridge = readFileSync(path.join(process.cwd(), 'sidecar/ios_bridge.py'), 'utf8');
+  assert.equal(bridge.match(/^PINNED_VERSION = "([^"]+)"/m)?.[1], pinned);
+  const build = readFileSync(path.join(process.cwd(), 'scripts/build-ios-sidecar.mjs'), 'utf8');
+  assert.doesNotMatch(build, /pymobiledevice3: '\d/);
 });

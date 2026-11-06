@@ -16,7 +16,7 @@ Electron main (electron/main.mjs)
 Controller (backend/controller.mjs)        one session, journal, recovery, routes
    ├── Store (backend/store.mjs)           settings.json, atomic tmp+rename writes
    ├── IosAdapter (backend/ios.mjs)        JSONL over stdio to the sidecar
-   │      └── sidecar/ios_bridge.py        pymobiledevice3 11.12.4 (pinned), DVT
+   │      └── sidecar/ios_bridge.py        pymobiledevice3 11.50.0 (pinned), DVT
    └── AndroidAdapter (backend/android.mjs) ADB + Appium Settings helper
 ```
 
