@@ -189,7 +189,9 @@ $('#app').innerHTML = `
       <ol class="setup-checklist">
         <li data-step="usb-iphone"><strong>Plug in and select your iPhone</strong><span>Choose <em>USB cable</em> above and select the iPhone in the Phone list. Install Tailscale on the iPhone and this computer, signed in to the same account.</span></li>
         <li data-step="paired"><strong>Set up remote access</strong><span>One time per computer. It shows on the iPhone under Settings › Developer › Paired Computers, where you can remove it.</span><button id="pair-remote" class="secondary-button compact">Set up remote access</button></li>
-        <li data-step="host"><strong>Enter the iPhone’s Tailscale address</strong><span>Open the Tailscale app on the iPhone and copy its address. It starts with 100.</span>
+        <li data-step="host"><strong>Enter the iPhone’s Tailscale address</strong><span>Ghost can look it up from Tailscale on this computer. Otherwise copy it from the Tailscale app on the iPhone; it starts with 100.</span>
+          <div class="inline-form"><button id="find-tailscale" type="button" class="secondary-button compact">Find with Tailscale</button><span class="field-hint">or type it below</span></div>
+          <div id="tailscale-results" class="tailscale-results" hidden></div>
           <form id="remote-host-form" class="inline-form"><input id="remote-host" class="text-input" placeholder="100.101.102.103" autocomplete="off" spellcheck="false" aria-label="iPhone Tailscale address" /><button type="submit" class="secondary-button compact">Save</button><button id="clear-remote-host" type="button" class="text-button">Clear</button></form></li>
         <li><strong>Unplug and choose Remote</strong><span>Keep the iPhone on any Wi-Fi with Tailscale on, then choose <em>Remote</em> above.</span></li>
       </ol>
@@ -729,6 +731,23 @@ document.querySelectorAll('[data-connection]').forEach(button => {
   button.onclick = () => button.dataset.connection === 'wifi' && handoffPhone() ? switchToWifi() : runOperation(() => api.setConnection(button.dataset.connection));
 });
 $('#pair-remote').onclick = () => runOperation(() => api.pairRemote(selectedDeviceId), 'Remote access is set up. Next, enter the iPhone’s Tailscale address.');
+$('#find-tailscale').onclick = async () => {
+  const results = $('#tailscale-results');
+  const phones = await runOperation(() => api.findTailscalePhones());
+  if (!phones) return;
+  results.hidden = false;
+  results.innerHTML = phones.length
+    ? phones.map((phone, index) => `<button type="button" class="tailscale-result" data-tailscale="${index}"><span class="status-dot ${phone.online ? 'online' : ''}"></span><span><strong>${esc(phone.name)}</strong><small>${esc(phone.ip)} · ${phone.online ? 'online' : 'offline'}</small></span><span>Use</span></button>`).join('')
+    : '<p class="settings-note">No iPhone or iPad found on your tailnet. Open Tailscale on the iPhone and sign in to the same account.</p>';
+  results.querySelectorAll('[data-tailscale]').forEach(button => {
+    button.onclick = async () => {
+      const phone = phones[Number(button.dataset.tailscale)];
+      $('#remote-host').value = phone.ip;
+      const saved = await runOperation(() => api.updatePreferences({ remoteHost: phone.ip }), `Using ${phone.name} at ${phone.ip}.`);
+      if (saved) results.hidden = true;
+    };
+  });
+};
 $('#remote-host-form').onsubmit = (event) => { event.preventDefault(); runOperation(() => api.updatePreferences({ remoteHost: $('#remote-host').value.trim() }), 'Tailscale address saved.'); };
 $('#clear-remote-host').onclick = () => runOperation(() => api.updatePreferences({ remoteHost: null }), 'Tailscale address cleared.');
 $('#enable-iphone-wifi').onclick = () => runOperation(() => api.connectWifi({platform: 'ios', deviceId: selectedDeviceId}), 'Wireless access is set up. Join the same Wi-Fi, then choose Wi-Fi above.');

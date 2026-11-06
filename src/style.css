@@ -463,3 +463,12 @@ dialog[open] { animation: rise .18s ease-out; }
 .inline-form .text-input { width: 190px; min-height: 36px; }
 .guide-notes { margin: 12px 0 0; padding-left: 18px; color: var(--secondary); font-size: 12px; line-height: 1.55; display: grid; gap: 4px; }
 @media (max-width: 700px) { .connection-modes { grid-template-columns: 1fr; } }
+
+.field-hint { color: var(--secondary); font-size: 12px; }
+.tailscale-results { display: grid; gap: 6px; margin-top: 6px; max-width: 420px; }
+.tailscale-result { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.6); color: var(--text); text-align: left; cursor: pointer; }
+.tailscale-result > span:nth-child(2) { flex: 1; display: flex; flex-direction: column; }
+.tailscale-result small { color: var(--secondary); font-size: 11.5px; }
+.tailscale-result > span:last-child { color: #087bff; font-size: 12px; font-weight: 600; }
+.tailscale-result .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #b0b4ba; }
+.tailscale-result .status-dot.online { background: #1f9d55; }

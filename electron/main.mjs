@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, protocol, net, session, dialog, Menu, shell, powerMonitor, powerSaveBlocker } from 'electron';
+import { app, BrowserWindow, ipcMain, protocol, net, session, dialog, Menu, shell, powerMonitor, powerSaveBlocker, Notification } from 'electron';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
@@ -12,17 +12,27 @@ import { wifiStatus } from '../backend/network.mjs';
 import { RouteJournal } from '../backend/route-journal.mjs';
 import { WakeLock } from '../backend/power.mjs';
 import { TileSource } from '../backend/tiles.mjs';
+import { ConnectionAlerts } from '../backend/alerts.mjs';
 
 const rootPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const devUrl = !app.isPackaged && process.env.GHOST_DEV_URL === 'http://127.0.0.1:5173' ? process.env.GHOST_DEV_URL : null;
 if (!app.isPackaged) app.setPath('userData', process.env.GHOST_TEST_DATA || path.join(rootPath, '.ghost-dev'));
 app.setName('Ghost');
+// Windows shows desktop notifications only for an app with this ID (matches build.appId).
+if (process.platform === 'win32') app.setAppUserModelId('org.ghostlocation.desktop');
 protocol.registerSchemesAsPrivileged([{ scheme: 'ghost', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 
 let window, controller, poll, quitting = false, quitPending = false;
 const geocoder = new Geocoder();
 const wakeLock = new WakeLock(powerSaveBlocker);
 const tileSource = new TileSource();
+const connectionAlerts = new ConnectionAlerts();
+function showAlert(alert) {
+  if (!alert || !Notification.isSupported()) return;
+  const note = new Notification({ title: alert.title, body: alert.body, urgency: alert.kind === 'lost' ? 'critical' : 'normal' });
+  note.on('click', () => { if (window && !window.isDestroyed()) { window.show(); window.focus(); } });
+  note.show();
+}
 let tileError = null, markTilesReady;
 // The renderer may ask before startup has read the saved tile preference.
 const tilesReady = new Promise(resolve => { markTilesReady = resolve; });
@@ -70,6 +80,7 @@ async function boot() {
     routeJournal: new RouteJournal(path.join(app.getPath('userData'), 'route.json')) });
   controller.on('state', state => {
     wakeLock.update(state); // released as soon as Restore removes the session
+    showAlert(connectionAlerts.update(state));
     if (window && !window.isDestroyed()) window.webContents.send('ghost:state', state);
   });
 
@@ -81,6 +92,7 @@ async function boot() {
     scanDevices: () => controller.scanDevices(),
     prepareDevice: id => controller.prepareDevice(id),
     pairRemote: id => controller.pairRemote(id),
+    findTailscalePhones: () => controller.findTailscalePhones(),
     applyLocation: value => controller.applyLocation(value),
     stopLocation: () => controller.stopLocation(),
     getRoute: () => controller.getRoute(),
@@ -169,6 +181,7 @@ app.on('before-quit', event => {
 });
 
 async function finishQuit() {
+  connectionAlerts.suppress(); // Quitting ends sessions on purpose; never alert about it.
   if (controller.state.busy) {
     await dialog.showMessageBox(window, { type: 'info', message: 'A device operation is still running.', detail: 'Wait for it to finish before closing Ghost.', buttons: ['Keep Ghost open'] });
     return;

@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { place, text, geocoderUrl, routingUrl, speedMph, remoteHost, DEFAULT_SPEED_MPH } from './validation.mjs';
 import { Router, measurePath, pointAlong, speedMps } from './routing.mjs';
+import { findTailscaleApplePeers } from './tailscale.mjs';
 
 const REPLACEABLE_SESSION_STATUSES = new Set(['unknown', 'waiting', 'error']);
 const USABLE_REPLACEMENT_STATES = new Set(['ready', 'setup-required']);
@@ -10,9 +11,10 @@ const CONNECTIONS = ['usb', 'wifi', 'remote'];
 const runningMessage = route => `Following the road at ${route.speedMph} mph. Sending a location every second.`;
 
 export class Controller extends EventEmitter {
-  constructor({ adapters, store, now = Date.now, router = new Router(), clock = () => performance.now(), network = async () => ({wifi: false}), routeJournal = null }) {
+  constructor({ adapters, store, now = Date.now, router = new Router(), clock = () => performance.now(), network = async () => ({wifi: false}), routeJournal = null, tailscale = findTailscaleApplePeers }) {
     super(); this.adapters = adapters; this.store = store;
     this.routeJournal = routeJournal; this.routeCheckpointAt = -Infinity;
+    this.tailscale = tailscale;
     this.state = { devices: [], runtime: {}, session: null, savedPlaces: [], recentPlaces: [], preferences: {}, busy: false, warning: null };
     this.scanning = null;
     this.now = now; this.network = network; this.networkCheckedAt = -Infinity;
@@ -47,6 +49,8 @@ export class Controller extends EventEmitter {
     const { remoteHost: host = null, remoteUdid: udid = null } = this.state.preferences;
     if (this.adapters.ios) this.adapters.ios.remote = { host, udid };
   }
+  /** iPhones/iPads on this computer's tailnet, read from the local Tailscale CLI (read-only). */
+  async findTailscalePhones() { return this.tailscale(); }
   /** One-time USB setup for Wi-Fi and remote (Tailscale) iPhone connections. */
   async pairRemote(id) {
     return this.exclusive(async () => {

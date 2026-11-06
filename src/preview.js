@@ -35,6 +35,7 @@ export function createPreviewBridge() {
     connectWifi: desktopOnly,
     prepareDevice: desktopOnly,
     pairRemote: desktopOnly,
+    findTailscalePhones: desktopOnly,
     applyLocation: desktopOnly,
     stopLocation: desktopOnly,
     getRoute: async () => null,

@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('ghost', Object.freeze({
   scanDevices: () => invoke('scanDevices'),
   prepareDevice: id => invoke('prepareDevice', id),
   pairRemote: id => invoke('pairRemote', id),
+  findTailscalePhones: () => invoke('findTailscalePhones'),
   applyLocation: point => invoke('applyLocation', point),
   stopLocation: () => invoke('stopLocation'),
   getRoute: () => invoke('getRoute'),
