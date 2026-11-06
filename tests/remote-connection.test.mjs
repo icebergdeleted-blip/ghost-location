@@ -103,3 +103,30 @@ test('the remote address cannot change under a live remote session', async () =>
   await assert.rejects(f.c.updatePreferences({ remoteHost: null }), /Restore the current location/);
   await f.c.updatePreferences({ remoteHost: '100.64.0.9' }); // unchanged address is fine
 });
+
+test('an unresolved session on the same phone can move to Remote and be restored there', async () => {
+  const stale = { id: 's1', deviceId: usbPhone.id, platform: 'ios', serial: UDID, connection: 'usb', latitude: 1, longitude: 2, status: 'active' };
+  const f = await controllerFixture({ remoteHost: '100.64.0.9', remoteUdid: UDID });
+  f.c.state.session = { ...stale, status: 'unknown', autoReconnect: false };
+  const calls = [];
+  f.ios.list = async () => (f.ios.connection === 'remote' ? [{ ...usbPhone, connection: 'remote' }] : []);
+  f.ios.reset = async device => calls.push(['reset', device.connection]);
+  f.ios.clear = async device => calls.push(['clear', device.connection]);
+  f.ios.set = async () => { throw new Error('must not re-apply automatically'); };
+  await f.c.setConnection('remote');
+  assert.equal(f.c.state.session.status, 'unknown');
+  assert.match(f.c.state.session.message, /Switched to Remote.*Retry location or Restore/);
+  await f.c.scanDevices();
+  await f.c.stopLocation();
+  assert.equal(f.c.state.session, null);
+  assert.deepEqual(calls, [['reset', 'remote'], ['clear', 'remote']]);
+});
+
+test('a live session, or a stale record for a different phone, still blocks a connection change', async () => {
+  const f = await controllerFixture({ remoteHost: '100.64.0.9', remoteUdid: UDID });
+  f.c.state.session = { id: 's', deviceId: usbPhone.id, platform: 'ios', status: 'active' };
+  await assert.rejects(f.c.setConnection('remote'), /Restore the current location/);
+  f.c.state.session = { id: 's', deviceId: 'ios:SOMEOTHERPHONE01', platform: 'ios', status: 'unknown' };
+  await assert.rejects(f.c.setConnection('remote'), /Restore the current location/);
+  assert.equal(f.c.state.preferences.connection, 'usb');
+});

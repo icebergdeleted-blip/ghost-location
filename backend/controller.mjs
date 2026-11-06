@@ -235,10 +235,25 @@ export class Controller extends EventEmitter {
     if (connection === (this.state.preferences.connection || 'usb')) return this.snapshot();
     if (connection === 'wifi' && this.state.session?.status === 'active' && (this.state.session.connection || 'usb') === 'usb') return this.switchToWifi(this.state.session.deviceId);
     return this.exclusive(async () => {
-      if (this.state.session) throw new Error('Restore the current location before changing connections.');
+      const session = this.state.session;
+      // An unresolved record may move to another connection so the SAME phone can be
+      // restored or retried there (e.g. away from the cable). A live session may not.
+      const unresolved = session && REPLACEABLE_SESSION_STATUSES.has(session.status);
+      const samePhone = connection !== 'remote' || session?.deviceId === `ios:${this.state.preferences.remoteUdid}`;
+      if (session && !(unresolved && samePhone)) throw new Error('Restore the current location before changing connections.');
       const previous = this.state.preferences.connection;
+      const previousSession = session && { autoReconnect: session.autoReconnect, message: session.message };
       this.state.preferences.connection = connection;
-      try { await this.persist(); } catch (error) { this.state.preferences.connection = previous; throw error; }
+      if (session) {
+        this.resumeSessionId = null; // never re-apply automatically after a transport change
+        session.autoReconnect = false;
+        session.message = `Switched to ${connection === 'remote' ? 'Remote' : connection === 'wifi' ? 'Wi-Fi' : 'USB'}. When this phone appears, choose Retry location or Restore.`;
+      }
+      try { await this.persist(); } catch (error) {
+        this.state.preferences.connection = previous;
+        if (session) Object.assign(session, previousSession);
+        throw error;
+      }
       for (const adapter of Object.values(this.adapters)) adapter.connection = connection;
       this.state.devices = [];
       await this.scan();

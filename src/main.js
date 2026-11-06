@@ -574,10 +574,12 @@ function renderConnections() {
   const mode = state.preferences.connection || 'usb';
   const busy = pending || state.busy, phone = handoffPhone();
   const modeLabel = mode === 'remote' ? 'Remote' : mode === 'wifi' ? 'Wi-Fi' : 'USB';
+  // An unresolved record may move to another connection to be restored there; a live one may not.
+  const liveSession = Boolean(state.session) && !['unknown', 'waiting', 'error'].includes(state.session.status);
   $('#connection-options').textContent = `Connection: ${modeLabel} · Change`;
   document.querySelectorAll('[data-connection]').forEach(button => {
     button.setAttribute('aria-pressed', String(button.dataset.connection === mode));
-    button.disabled = busy || (button.dataset.connection !== mode && Boolean(state.session) && !phone) ||
+    button.disabled = busy || (button.dataset.connection !== mode && liveSession && !phone) ||
       (button.dataset.connection === 'remote' && mode !== 'remote' && !(state.preferences.remoteHost && state.preferences.remoteUdid));
   });
   document.querySelector('[data-connection="remote"]').title = state.preferences.remoteHost && state.preferences.remoteUdid ? '' : 'Finish the Remote setup steps first.';
@@ -590,7 +592,8 @@ function renderConnections() {
     : 'Follow the steps below. Ticks show what’s done.';
   const found = `${state.devices.length} phone${state.devices.length === 1 ? '' : 's'} found`;
   $('#wifi-status').textContent = busy ? 'Working… Keep the phone unlocked.'
-    : state.session && !phone ? `Using ${modeLabel}. Restore real location before switching connections.`
+    : liveSession && !phone ? `Using ${modeLabel}. Restore real location before switching connections.`
+    : state.session ? `Using ${modeLabel}. A previous location needs attention: switch to where the phone is now, then Retry or Restore.`
     : mode === 'remote' ? `Using Remote · ${found}.`
     : `Using ${modeLabel} · ${found}.`;
   // Only offer the switch while a location is live, or while following the iPhone Wi-Fi steps.
