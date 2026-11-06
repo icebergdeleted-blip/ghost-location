@@ -186,11 +186,11 @@ class Bridge:
     def describe_remote(self, service, connection):
         info = (service.handshake_info or {}).get("peerDeviceInfo") or {}
         udid = service.remote_identifier
-        label = "Tailscale/remote" if connection == "remote" else "Wi-Fi"
+        detail = "Connected remotely through Tailscale." if connection == "remote" else "Connected over Wi-Fi."
         return {"id": f"ios:{udid}", "serial": udid, "platform": "ios",
                 "name": str(info.get("name") or "iPhone")[:80], "osVersion": "",
                 "connection": connection, "state": "ready",
-                "detail": f"{label} connected through RemotePairing. Developer image must be mounted over USB since the last restart."}
+                "detail": detail}
 
     async def discover(self, udid=None):
         result = []

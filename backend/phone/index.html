@@ -1,0 +1,45 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+  <title>Ghost</title>
+  <link rel="stylesheet" href="/vendor/leaflet.css" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header><span class="brand">Ghost</span><span id="pill" class="pill">Connecting…</span></header>
+
+  <main id="pair-view" hidden>
+    <h1>Pair this phone</h1>
+    <p>On the computer, open Ghost › Settings › Phone control and choose <strong>Pair a phone</strong>. Enter the 6-digit code here.</p>
+    <form id="pair-form">
+      <input id="pair-code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="123456" required aria-label="Pairing code" />
+      <button type="submit">Pair</button>
+    </form>
+    <p id="pair-error" class="error" role="alert"></p>
+  </main>
+
+  <main id="control-view" hidden>
+    <section id="status" class="card" aria-live="polite"></section>
+    <div id="map" aria-label="Map. Tap to choose a point."></div>
+    <section class="card">
+      <h2>Choose a place</h2>
+      <p class="hint">Tap the map, pick a saved place, or enter coordinates.</p>
+      <div class="coords">
+        <label>Latitude<input id="lat" inputmode="decimal" placeholder="40.68925" /></label>
+        <label>Longitude<input id="lon" inputmode="decimal" placeholder="-74.04450" /></label>
+      </div>
+      <select id="saved" aria-label="Saved places"><option value="">Saved places…</option></select>
+      <button id="set" class="primary" type="button">Set location</button>
+      <button id="restore" class="restore" type="button">Restore real location</button>
+      <p id="error" class="error" role="alert"></p>
+    </section>
+    <p class="foot">Commands go to Ghost on your computer, which talks to the phone. If that connection drops, the phone returns to its real location within about a minute.</p>
+  </main>
+  <script src="/vendor/leaflet.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -639,6 +639,10 @@ export class Controller extends EventEmitter {
     if (!input || typeof input !== 'object') throw new Error('Invalid preferences.');
     if (input.routeSpeedMph != null) speedMph(input.routeSpeedMph); // validate before changing anything
     if (input.routingUrl != null) this.state.preferences.routingUrl = routingUrl(text(input.routingUrl));
+    if (input.phoneControlEnabled != null) {
+      if (typeof input.phoneControlEnabled !== 'boolean') throw new Error('Invalid phone control preference.');
+      this.state.preferences.phoneControlEnabled = input.phoneControlEnabled;
+    }
     if (input.remoteHost !== undefined) {
       if (input.remoteHost === null || input.remoteHost === '') {
         if (this.state.preferences.connection === 'remote' && this.state.session) throw new Error('Restore the current location before clearing the remote address.');

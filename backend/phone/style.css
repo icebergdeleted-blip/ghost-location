@@ -1,0 +1,29 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+:root { --bg: #f4f5f7; --card: #fff; --text: #1d1d1f; --muted: #6b6f76; --line: #dde0e4; --blue: #087bff; --green: #1f9d55; --red: #c4321c; --amber: #b26a00; }
+@media (prefers-color-scheme: dark) { :root { --bg: #111214; --card: #1c1d20; --text: #f2f2f4; --muted: #a0a4ab; --line: #2e3035; } }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; } /* layout rules must never reveal a hidden view */
+html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+header { position: sticky; top: 0; z-index: 1000; display: flex; justify-content: space-between; align-items: center; padding: calc(12px + env(safe-area-inset-top)) 16px 12px; background: var(--card); border-bottom: 1px solid var(--line); }
+.brand { font-weight: 700; font-size: 18px; }
+.pill { font-size: 12.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: var(--line); }
+.pill.live { background: var(--green); color: #fff; }
+.pill.warn { background: var(--amber); color: #fff; }
+main { padding: 16px; max-width: 560px; margin: 0 auto; display: grid; gap: 14px; }
+h1 { font-size: 22px; margin: 8px 0 0; }
+h2 { font-size: 16px; margin: 0; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px; display: grid; gap: 10px; }
+.hint, .foot { color: var(--muted); font-size: 13px; margin: 0; }
+#status strong { font-size: 16px; }
+#status span { color: var(--muted); font-size: 13.5px; }
+#map { height: 300px; border-radius: 16px; border: 1px solid var(--line); }
+.coords { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+label { display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); }
+input, select { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); color: var(--text); font-size: 16px; }
+button { min-height: 48px; border: 0; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; }
+button:disabled { opacity: .5; }
+.primary, #pair-form button { background: var(--blue); color: #fff; }
+.restore { background: transparent; color: var(--red); border: 1px solid var(--line); }
+#pair-form { display: grid; gap: 10px; }
+#pair-code { font-size: 28px; letter-spacing: 8px; text-align: center; }
+.error { color: var(--red); font-size: 14px; margin: 0; min-height: 1em; }

@@ -16,6 +16,7 @@ export const defaults = () => ({
     tilePath: null,
     remoteHost: null,
     remoteUdid: null,
+    phoneControlEnabled: false,
   }
 });
 

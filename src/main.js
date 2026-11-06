@@ -236,6 +236,17 @@ $('#app').innerHTML = `
   <dialog id="settings-dialog" class="sheet-dialog" aria-labelledby="settings-title">
     <div class="sheet-heading"><div><span class="eyebrow">Ghost</span><h2 id="settings-title">Settings</h2></div><button class="icon-button" data-close="settings-dialog" aria-label="Close settings">${icon('x')}</button></div>
     <div class="settings-group"><h3>Device setup</h3><div class="configuration-row"><div><strong id="settings-configuration">No setup selected</strong><small>Ghost uses this to show the right connection steps.</small></div><button id="rerun-onboarding" class="secondary-button compact">Change</button></div></div>
+    <div class="settings-group" id="phone-control-group"><h3>Phone control</h3>
+      <label class="setting-row"><span><strong>Control Ghost from your phone</strong><small>Open a page on your phone, over Tailscale only, to set or restore locations while away from this computer. Off by default.</small></span><input id="phone-control-toggle" type="checkbox" class="switch" /></label>
+      <div id="phone-control-details" hidden>
+        <p class="settings-note">On your phone (with Tailscale on), open:</p>
+        <div class="inline-form"><code id="phone-control-url" class="url-box"></code><button id="phone-control-copy" type="button" class="text-button">Copy</button></div>
+        <div class="inline-form"><button id="phone-control-pair" type="button" class="secondary-button compact">Pair a phone</button><span id="phone-control-code" class="pair-code" aria-live="polite"></span></div>
+        <p id="phone-control-info" class="settings-note"></p>
+        <button id="phone-control-revoke" type="button" class="text-button danger-text">Sign out all phones</button>
+      </div>
+      <p id="phone-control-error" class="settings-note error-text" role="alert"></p>
+    </div>
     <div class="settings-group"><h3>Location sessions</h3><label class="setting-row"><span><strong>Restore on quit</strong><small>Ghost tries to stop location simulation before it closes. Keep the phone connected.</small></span><input id="restore-preference" type="checkbox" class="switch" /></label></div>
     <div class="settings-group"><h3>Device tools</h3><div id="runtime-status"></div><button id="install-runtime" class="secondary-button">${icon('download')} Prepare device tools</button><p class="settings-note">First-time preparation may need an internet connection.</p></div>
     <form id="provider-form" class="settings-group"><h3>Place search</h3><label class="field-label" for="provider-url">Photon-compatible endpoint</label><input id="provider-url" class="text-input" type="url" required placeholder="https://photon.komoot.io/api/" /><p class="settings-note">Search runs only when you submit. Plain HTTP is allowed only for a server on this computer or your private network.</p><div class="button-row"><button type="submit" class="secondary-button compact">Save endpoint</button><button id="reset-provider" type="button" class="text-button">Reset</button></div></form>
@@ -302,7 +313,8 @@ function acceptState(next) {
   render();
   if (!selectedPlace && state.session && Number.isFinite(state.session.latitude) && Number.isFinite(state.session.longitude)) selectPlace(state.session);
   if (state.warning && state.warning !== lastWarning) { lastWarning = state.warning; notify(state.warning, true); }
-  if (!onboardingShown && state.preferences.onboardingComplete !== true) {
+  // `false` only once saved settings have loaded; `undefined` means Ghost is still starting.
+  if (!onboardingShown && state.preferences.onboardingComplete === false) {
     onboardingShown = true;
     requestAnimationFrame(() => openOnboarding());
   }
@@ -367,7 +379,7 @@ function renderDevices() {
   }
   const device = selectedDevice || state.devices[0];
   const deviceStatus = { ready: 'Ready', 'setup-required': 'Setup needed', unauthorized: 'Trust this computer', offline: 'Disconnected' }[device.state] || 'Check connection';
-  setContent('#device-area', `<div class="device-card ${device.state === 'ready' ? 'ready' : ''}"><div class="device-card-top">${icon('smartphone')}<div class="device-select-wrap"><label class="sr-only" for="device-select">Connected phone</label><select id="device-select">${state.devices.map((phone) => `<option value="${esc(phone.id)}" ${phone.id === selectedDeviceId ? 'selected' : ''}>${esc(phone.name || platformName(phone.platform))}</option>`).join('')}</select><span>${esc(platformName(device.platform))}${device.osVersion ? ` ${esc(device.osVersion)}` : ''} · ${device.connection === 'wifi' ? 'Wi-Fi' : 'USB'}</span></div>${icon('chevron-down')}</div><div class="device-card-state"><span class="status-dot"></span><span>${deviceStatus}</span>${device.state === 'ready' ? icon('check') : `<button id="prepare-device" class="text-button" ${pending ? 'disabled' : ''}>${device.state === 'setup-required' ? 'Prepare' : 'Help'} ${icon('arrow-right')}</button>`}</div></div>${device.detail ? `<p class="device-detail">${esc(device.detail)}</p>` : ''}`);
+  setContent('#device-area', `<div class="device-card ${device.state === 'ready' ? 'ready' : ''}"><div class="device-card-top">${icon('smartphone')}<div class="device-select-wrap"><label class="sr-only" for="device-select">Connected phone</label><select id="device-select">${state.devices.map((phone) => `<option value="${esc(phone.id)}" ${phone.id === selectedDeviceId ? 'selected' : ''}>${esc(phone.name || platformName(phone.platform))}</option>`).join('')}</select><span>${esc(platformName(device.platform))}${device.osVersion ? ` ${esc(device.osVersion)}` : ''} · ${device.connection === 'remote' ? 'Remote' : device.connection === 'wifi' ? 'Wi-Fi' : 'USB'}</span></div>${icon('chevron-down')}</div><div class="device-card-state"><span class="status-dot"></span><span>${deviceStatus}</span>${device.state === 'ready' ? icon('check') : `<button id="prepare-device" class="text-button" ${pending ? 'disabled' : ''}>${device.state === 'setup-required' ? 'Prepare' : 'Help'} ${icon('arrow-right')}</button>`}</div></div>${device.detail ? `<p class="device-detail">${esc(device.detail)}</p>` : ''}`);
   $('#device-select').onchange = (event) => { selectedDeviceId = event.target.value; render(); };
   $('#device-select').onblur = () => { renderDevices(); paintIcons(); };
   if ($('#prepare-device')) $('#prepare-device').onclick = () => {
@@ -673,7 +685,32 @@ $('#routing-form').onsubmit = (event) => { event.preventDefault(); const url = $
 $('#reset-routing').onclick = () => { $('#routing-url').value = 'https://router.project-osrm.org/'; runOperation(() => api.updatePreferences({ routingUrl: 'https://router.project-osrm.org/' }), 'Default routing service restored.'); };
 $('#connection-badge').onclick = openSetup;
 $('#help-button').onclick = openSetup;
-$('#settings-button').onclick = () => { $('#provider-url').value = state.preferences.geocoderUrl || 'https://photon.komoot.io/api/'; $('#routing-url').value = state.preferences.routingUrl || 'https://router.project-osrm.org/'; renderTileStatus(); renderRuntime(); paintIcons(); $('#settings-dialog').showModal(); };
+let phoneControlStatus = { enabled: false };
+function renderPhoneControl(status = phoneControlStatus) {
+  phoneControlStatus = status || { enabled: false };
+  const on = Boolean(phoneControlStatus.enabled);
+  $('#phone-control-toggle').checked = on || state.preferences.phoneControlEnabled === true;
+  $('#phone-control-toggle').disabled = isPreview || pending;
+  $('#phone-control-details').hidden = !on;
+  $('#phone-control-url').textContent = phoneControlStatus.url || '';
+  const pairing = phoneControlStatus.pairing;
+  const minutes = pairing ? Math.max(1, Math.ceil((pairing.expiresAt - Date.now()) / 60000)) : 0;
+  $('#phone-control-code').textContent = pairing ? `${pairing.code.slice(0, 3)} ${pairing.code.slice(3)} · expires in ${minutes} min` : '';
+  $('#phone-control-info').textContent = on ? `${phoneControlStatus.phones || 0} phone${phoneControlStatus.phones === 1 ? '' : 's'} paired. Commands from the phone work like the buttons here.` : '';
+  $('#phone-control-error').textContent = state.preferences.phoneControlEnabled && !on ? (phoneControlStatus.error || 'Phone control is waiting for Tailscale. Turn it off and on again once Tailscale is connected.') : '';
+}
+async function phoneControlAction(action, success) {
+  const status = await runOperation(() => api.phoneControl(action), success);
+  if (status) renderPhoneControl(status);
+  else if (api.phoneControl && !isPreview) renderPhoneControl(await api.phoneControl('status').catch(() => phoneControlStatus));
+}
+$('#phone-control-toggle').onchange = () => phoneControlAction($('#phone-control-toggle').checked ? 'enable' : 'disable', $('#phone-control-toggle').checked ? 'Phone control is on. Pair a phone next.' : 'Phone control is off.');
+$('#phone-control-pair').onclick = () => phoneControlAction('pair');
+$('#phone-control-revoke').onclick = () => phoneControlAction('revoke', 'All phones were signed out.');
+$('#phone-control-copy').onclick = () => { navigator.clipboard?.writeText(phoneControlStatus.url || '').then(() => notify('Address copied.'), () => {}); };
+if (api.onPhoneControl) api.onPhoneControl(status => { renderPhoneControl(status); notify('A phone was paired with Ghost.'); });
+$('#settings-button').onclick = () => {
+  if (api.phoneControl && !isPreview) api.phoneControl('status').then(renderPhoneControl, () => {}); $('#provider-url').value = state.preferences.geocoderUrl || 'https://photon.komoot.io/api/'; $('#routing-url').value = state.preferences.routingUrl || 'https://router.project-osrm.org/'; renderTileStatus(); renderRuntime(); paintIcons(); $('#settings-dialog').showModal(); };
 $('#scan-button').onclick = () => runOperation(() => api.scanDevices(), 'Device list refreshed.');
 $('#setup-scan').onclick = async () => { const result = await runOperation(() => api.scanDevices()); if (result && !result.devices.some((device) => device.platform === setupPlatform && device.state !== 'offline')) $('#setup-detection').textContent = `No ${platformName(setupPlatform)} found. Check the data cable, unlock the phone, and accept its prompt.`; };
 $('#change-configuration').onclick = openOnboarding;

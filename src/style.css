@@ -472,3 +472,9 @@ dialog[open] { animation: rise .18s ease-out; }
 .tailscale-result > span:last-child { color: #087bff; font-size: 12px; font-weight: 600; }
 .tailscale-result .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #b0b4ba; }
 .tailscale-result .status-dot.online { background: #1f9d55; }
+
+.url-box { padding: 7px 10px; border: 1px solid var(--line); border-radius: 9px; font-size: 12.5px; user-select: all; }
+.pair-code { font-size: 17px; font-weight: 700; letter-spacing: 1px; font-variant-numeric: tabular-nums; }
+.danger-text { color: #c4321c; }
+.error-text { color: #c4321c; }
+#phone-control-details { display: grid; gap: 10px; margin-top: 10px; }

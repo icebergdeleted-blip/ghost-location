@@ -13,6 +13,7 @@ import { RouteJournal } from '../backend/route-journal.mjs';
 import { WakeLock } from '../backend/power.mjs';
 import { TileSource } from '../backend/tiles.mjs';
 import { ConnectionAlerts } from '../backend/alerts.mjs';
+import { PhoneControl } from '../backend/phone-control.mjs';
 
 const rootPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const devUrl = !app.isPackaged && process.env.GHOST_DEV_URL === 'http://127.0.0.1:5173' ? process.env.GHOST_DEV_URL : null;
@@ -22,7 +23,7 @@ app.setName('Ghost');
 if (process.platform === 'win32') app.setAppUserModelId('org.ghostlocation.desktop');
 protocol.registerSchemesAsPrivileged([{ scheme: 'ghost', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 
-let window, controller, poll, quitting = false, quitPending = false;
+let window, controller, poll, phoneControl, quitting = false, quitPending = false;
 const geocoder = new Geocoder();
 const wakeLock = new WakeLock(powerSaveBlocker);
 const tileSource = new TileSource();
@@ -78,6 +79,11 @@ async function boot() {
   const android = new AndroidAdapter({ ...options, ...callbacks });
   controller = new Controller({ adapters: { ios, android }, network: wifiStatus, store: new Store(path.join(app.getPath('userData'), 'settings.json')),
     routeJournal: new RouteJournal(path.join(app.getPath('userData'), 'route.json')) });
+  phoneControl = new PhoneControl({ controller, dataPath: path.join(app.getPath('userData'), 'phone-control.json') });
+  phoneControl.on('paired', () => {
+    showAlert({ kind: 'paired', title: 'Phone paired with Ghost', body: 'A phone can now control locations over Tailscale. Remove access anytime in Settings › Phone control.' });
+    if (window && !window.isDestroyed()) window.webContents.send('ghost:phone-control', phoneControl.status());
+  });
   controller.on('state', state => {
     wakeLock.update(state); // released as soon as Restore removes the session
     showAlert(connectionAlerts.update(state));
@@ -93,6 +99,18 @@ async function boot() {
     prepareDevice: id => controller.prepareDevice(id),
     pairRemote: id => controller.pairRemote(id),
     findTailscalePhones: () => controller.findTailscalePhones(),
+    phoneControl: async action => {
+      if (action === 'status') return phoneControl.status();
+      if (action === 'enable') {
+        const status = await phoneControl.start(); // throws with a clear reason (e.g. Tailscale not connected)
+        await controller.updatePreferences({ phoneControlEnabled: true });
+        return status;
+      }
+      if (action === 'disable') { await controller.updatePreferences({ phoneControlEnabled: false }); return phoneControl.stop(); }
+      if (action === 'pair') return phoneControl.newPairingCode();
+      if (action === 'revoke') return phoneControl.revokeAll();
+      throw new Error('Unknown phone control action.');
+    },
     applyLocation: value => controller.applyLocation(value),
     stopLocation: () => controller.stopLocation(),
     getRoute: () => controller.getRoute(),
@@ -166,6 +184,10 @@ async function boot() {
   else if (existsSync(path.join(dist, 'index.html'))) await window.loadURL('ghost://app/index.html');
   else throw new Error('Build the interface first with npm run build.');
   try { await controller.init(); } finally { await applyTileSource(controller.state.preferences); }
+  if (controller.state.preferences.phoneControlEnabled) {
+    // Start only on Tailscale; if it is not up yet, Settings shows why and offers to retry.
+    phoneControl.start().catch(() => {});
+  }
   controller.notify();
   poll = setInterval(() => controller.scanDevices().catch(error => { controller.state.warning = error.message; controller.notify(); }), 2000);
   powerMonitor.on('suspend', () => controller.suspend().catch(() => {}));
@@ -182,6 +204,7 @@ app.on('before-quit', event => {
 
 async function finishQuit() {
   connectionAlerts.suppress(); // Quitting ends sessions on purpose; never alert about it.
+  await phoneControl?.stop().catch(() => {});
   if (controller.state.busy) {
     await dialog.showMessageBox(window, { type: 'info', message: 'A device operation is still running.', detail: 'Wait for it to finish before closing Ghost.', buttons: ['Keep Ghost open'] });
     return;
