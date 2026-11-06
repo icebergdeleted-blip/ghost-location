@@ -161,44 +161,73 @@ $('#app').innerHTML = `
   </dialog>
 
   <dialog id="wifi-dialog" class="sheet-dialog" aria-labelledby="wifi-title">
-    <div class="sheet-heading"><div><span class="eyebrow">Phone connection</span><h2 id="wifi-title">Connect over Wi-Fi</h2></div><button class="icon-button" data-close="wifi-dialog" aria-label="Close connection settings">${icon('x')}</button></div>
-    <p class="sheet-intro">Keep your phone and computer on the same Wi-Fi network. Leave the cable connected until Ghost confirms the switch.</p>
-    <div class="location-modes" role="group" aria-label="Connection method"><button data-connection="usb">USB cable</button><button data-connection="wifi">Wi-Fi</button><button data-connection="remote">Remote</button></div>
-    <p id="wifi-status" class="settings-note" role="status"></p>
-    <div id="wifi-handoff" class="settings-group" hidden><button id="switch-to-wifi" class="primary-button">Switch to Wi-Fi</button><p class="settings-note">Your current location carries over. A running route pauses during the switch and continues once connected.</p><p id="wifi-android-note" class="settings-note" hidden>This enables Android network debugging on port 5555. Use a trusted network; restart the phone to turn it off.</p></div>
-    <div id="remote-access" class="settings-group">
-      <h3>iPhone remote access (Tailscale)</h3>
-      <p class="settings-note">Control your iPhone from anywhere on your Tailscale network. The iPhone must stay joined to some Wi-Fi network with Tailscale on; it does not work on cellular alone. Ghost keeps sending the location while connected, and the phone returns to its real location within about a minute if the connection drops.</p>
-      <ol class="wifi-steps"><li>Connect the iPhone by USB, select it, then choose <strong>Set up remote access</strong>. This is a one-time step; it appears on the iPhone under Settings → Developer → Paired Computers, where you can remove it.</li><li>Enter the iPhone’s Tailscale address (100.x.x.x, shown in the Tailscale app).</li><li>Choose <strong>Remote</strong> above. After each iPhone restart, connect it by USB once and choose Prepare.</li></ol>
-      <button id="pair-remote" class="secondary-button">Set up remote access (USB)</button>
-      <form id="remote-host-form" class="wifi-form"><label class="field-label" for="remote-host">iPhone remote address</label><input id="remote-host" class="text-input" placeholder="100.101.102.103" autocomplete="off" spellcheck="false" /><div class="button-row"><button type="submit" class="secondary-button compact">Save address</button><button id="clear-remote-host" type="button" class="text-button">Clear</button></div></form>
-      <p id="remote-status" class="settings-note" role="status"></p>
+    <div class="sheet-heading"><div><span class="eyebrow">Connection</span><h2 id="wifi-title">How Ghost reaches your phone</h2></div><button class="icon-button" data-close="wifi-dialog" aria-label="Close connection settings">${icon('x')}</button></div>
+    <div class="connection-modes" role="group" aria-label="Connection method">
+      <button data-connection="usb"><strong>USB cable</strong><small>Plugged into this computer. Most reliable.</small></button>
+      <button data-connection="wifi"><strong>Wi-Fi</strong><small>Phone and computer on the same Wi-Fi.</small></button>
+      <button data-connection="remote"><strong>Remote</strong><small>iPhone anywhere, through Tailscale.</small></button>
     </div>
-    <details id="wifi-manual"><summary>Manual setup and troubleshooting</summary>
-    <label class="field-label" for="wifi-phone">Your phone</label><select id="wifi-phone" class="text-input"><option value="ios">iPhone · iOS 17.4+</option><option value="android">Android · Android 11+</option></select>
+    <p id="wifi-status" class="connection-status" role="status"></p>
+    <div id="wifi-handoff" class="settings-group" hidden><button id="switch-to-wifi" class="primary-button">Switch to Wi-Fi</button><p id="wifi-handoff-note" class="settings-note">Your current location carries over. A running route pauses during the switch and continues once connected.</p><p id="wifi-android-note" class="settings-note" hidden>This turns on Android network debugging (port 5555). Use a trusted network; restarting the phone turns it off.</p></div>
+
+    <details id="wifi-manual" class="setup-guide"><summary>Setup steps</summary>
+    <label class="field-label" for="wifi-phone">Show steps for</label>
+    <select id="wifi-phone" class="text-input"><option value="ios">iPhone on Wi-Fi</option><option value="ios-remote">iPhone remote (Tailscale)</option><option value="android">Android on Wi-Fi</option></select>
+
     <div id="wifi-ios" class="settings-group">
-      <h3>Pair once by cable</h3>
-      <ol class="wifi-steps"><li>Choose USB cable above. Connect and unlock your iPhone, trust this computer and enable Developer Mode. On Windows, install Apple Devices first.</li><li>Select your iPhone in the main Phone menu, then choose Switch to Wi-Fi above.</li><li>Choose Wi-Fi above. Wait for the phone to appear, then unplug the cable. You can now set a location or start a route.</li></ol>
-      <button id="enable-iphone-wifi" class="secondary-button">Enable Wi-Fi for selected iPhone</button>
-      <p class="settings-note">If discovery fails, enable “Show this iPhone when on Wi-Fi” in Finder on Mac, or “Show this device when on Wi-Fi” in Apple Devices on Windows, and apply. Unlock the phone and refresh.</p>
+      <p class="guide-intro">One-time setup by cable, then no cable while you’re on the same Wi-Fi as this computer.</p>
+      <ol class="setup-checklist">
+        <li data-step="usb-iphone"><strong>Plug in and select your iPhone</strong><span>Choose <em>USB cable</em> above, unlock the iPhone and tap Trust if asked. Select it in the Phone list.</span></li>
+        <li data-step="paired"><strong>Set up wireless access</strong><span>Ghost turns on Wi-Fi access and pairs this computer with the iPhone. No prompt appears on the phone.</span><button id="enable-iphone-wifi" class="secondary-button compact">Set up wireless access</button></li>
+        <li><strong>Join the same Wi-Fi and switch</strong><span>Put both on the same Wi-Fi network, choose <em>Wi-Fi</em> above, wait for the iPhone to appear, then unplug.</span></li>
+      </ol>
     </div>
+
+    <div id="remote-access" class="settings-group" hidden>
+      <p class="guide-intro">Control your iPhone from anywhere on your Tailscale network: for example, the computer at home and the iPhone with you.</p>
+      <p id="remote-status" class="connection-status" role="status"></p>
+      <ol class="setup-checklist">
+        <li data-step="usb-iphone"><strong>Plug in and select your iPhone</strong><span>Choose <em>USB cable</em> above and select the iPhone in the Phone list. Install Tailscale on the iPhone and this computer, signed in to the same account.</span></li>
+        <li data-step="paired"><strong>Set up remote access</strong><span>One time per computer. It shows on the iPhone under Settings › Developer › Paired Computers, where you can remove it.</span><button id="pair-remote" class="secondary-button compact">Set up remote access</button></li>
+        <li data-step="host"><strong>Enter the iPhone’s Tailscale address</strong><span>Open the Tailscale app on the iPhone and copy its address. It starts with 100.</span>
+          <form id="remote-host-form" class="inline-form"><input id="remote-host" class="text-input" placeholder="100.101.102.103" autocomplete="off" spellcheck="false" aria-label="iPhone Tailscale address" /><button type="submit" class="secondary-button compact">Save</button><button id="clear-remote-host" type="button" class="text-button">Clear</button></form></li>
+        <li><strong>Unplug and choose Remote</strong><span>Keep the iPhone on any Wi-Fi with Tailscale on, then choose <em>Remote</em> above.</span></li>
+      </ol>
+      <ul class="guide-notes">
+        <li><strong>Wi-Fi required:</strong> any network works, but the iPhone must be joined to one. Cellular alone does not work.</li>
+        <li><strong>Stays only while connected:</strong> if the connection drops, the iPhone returns to its real location within about a minute.</li>
+        <li><strong>After the iPhone restarts:</strong> plug it in once and choose <em>Prepare</em>.</li>
+      </ul>
+    </div>
+
     <div id="wifi-android" class="settings-group" hidden>
-      <h3>Pair with Wireless debugging</h3>
-      <p class="settings-note">Choose Wi-Fi above. On Android 11 or later, enable Developer options (tap Build number seven times), then open Wireless debugging → Pair device with pairing code. Keep this screen open. No USB cable is needed.</p>
-      <form id="wifi-pair-form" class="wifi-form">
-        <label class="field-label" for="wifi-pair-address">Pairing IP address and port</label><input id="wifi-pair-address" class="text-input" placeholder="192.168.1.20:37123" autocomplete="off" required />
-        <label class="field-label" for="wifi-pair-code">Six-digit pairing code</label><input id="wifi-pair-code" class="text-input" type="password" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="off" required />
-        <button id="wifi-pair-button" type="submit" class="secondary-button">Pair phone</button>
-      </form>
-      <form id="wifi-connect-form" class="wifi-form">
-        <label class="field-label" for="wifi-connect-address">Connection IP address and port</label><input id="wifi-connect-address" class="text-input" placeholder="192.168.1.20:40567" autocomplete="off" required />
-        <p class="settings-note">After pairing, go back to the main Wireless debugging screen and use its IP address and port here. This port is different from the pairing port and may change after reconnecting.</p>
-        <button id="wifi-connect-button" type="submit" class="secondary-button">Connect paired phone</button>
-      </form>
-      <p class="settings-note">Once connected, close this panel and choose Prepare if needed. Keep Location on and select Appium Settings as the mock location app. Android 8–10 can switch from an authorized USB connection.</p>
+      <p class="guide-intro">Android 11 or later. No cable needed. Choose <em>Wi-Fi</em> above first.</p>
+      <ol class="setup-checklist">
+        <li><strong>Turn on Wireless debugging</strong><span>Settings › About phone › tap Build number seven times. Then Developer options › Wireless debugging › Pair device with pairing code. Keep that screen open.</span></li>
+        <li><strong>Pair</strong><span>Enter the pairing address and six-digit code shown on the phone.</span>
+          <form id="wifi-pair-form" class="wifi-form">
+            <label class="field-label" for="wifi-pair-address">Pairing IP address and port</label><input id="wifi-pair-address" class="text-input" placeholder="192.168.1.20:37123" autocomplete="off" required />
+            <label class="field-label" for="wifi-pair-code">Six-digit pairing code</label><input id="wifi-pair-code" class="text-input" type="password" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="off" required />
+            <button id="wifi-pair-button" type="submit" class="secondary-button compact">Pair phone</button>
+          </form></li>
+        <li><strong>Connect</strong><span>Go back to the main Wireless debugging screen and use the IP address and port shown there. It differs from the pairing port.</span>
+          <form id="wifi-connect-form" class="wifi-form">
+            <label class="field-label" for="wifi-connect-address">Connection IP address and port</label><input id="wifi-connect-address" class="text-input" placeholder="192.168.1.20:40567" autocomplete="off" required />
+            <button id="wifi-connect-button" type="submit" class="secondary-button compact">Connect paired phone</button>
+          </form></li>
+        <li><strong>Prepare</strong><span>Close this panel, select the phone and choose Prepare. Pick Appium Settings as the mock location app if Android asks.</span></li>
+      </ol>
     </div>
     </details>
-    <p class="settings-note">Allow Ghost and its device tools through your computer’s local-network/firewall prompts. Guest Wi-Fi, client isolation and some VPNs can prevent devices from finding each other. Keep Ghost open; restore real location before disconnecting.</p>
+
+    <details class="setup-guide"><summary>Not finding your phone?</summary>
+      <ul class="guide-notes">
+        <li>Unlock the phone and keep the screen on while Ghost searches.</li>
+        <li>Allow Ghost and its device tools through firewall and local-network prompts.</li>
+        <li>Guest Wi-Fi, campus networks and some VPNs keep devices apart. Use a home network, your computer’s hotspot, or Remote.</li>
+        <li>Restore real location before switching connections or unplugging.</li>
+      </ul>
+    </details>
     <div class="dialog-actions"><button id="wifi-refresh" class="primary-button">Refresh phones</button></div>
   </dialog>
 
@@ -537,15 +566,22 @@ function renderConnections() {
     button.disabled = busy || (button.dataset.connection !== mode && Boolean(state.session) && !phone) ||
       (button.dataset.connection === 'remote' && mode !== 'remote' && !(state.preferences.remoteHost && state.preferences.remoteUdid));
   });
+  document.querySelector('[data-connection="remote"]').title = state.preferences.remoteHost && state.preferences.remoteUdid ? '' : 'Finish the Remote setup steps first.';
   const selectedUsbIphone = state.devices.find(device => device.id === selectedDeviceId && device.platform === 'ios' && device.connection === 'usb');
   $('#pair-remote').disabled = busy || isPreview || mode !== 'usb' || !selectedUsbIphone || Boolean(state.session);
   if (document.activeElement !== $('#remote-host')) $('#remote-host').value = state.preferences.remoteHost || '';
-  $('#remote-status').textContent = !state.preferences.remoteUdid ? 'Not set up yet: connect the iPhone by USB and choose Set up remote access.'
-    : !state.preferences.remoteHost ? 'Set up for one iPhone. Enter its Tailscale address, then choose Remote.'
-    : mode === 'remote' ? `Using remote access at ${state.preferences.remoteHost}. ${state.devices.length ? 'iPhone reachable.' : 'iPhone not reachable — keep it on Wi-Fi with Tailscale on.'}`
-    : `Ready: choose Remote to connect to ${state.preferences.remoteHost}.`;
-  $('#wifi-status').textContent = mode === 'remote' && !busy ? (state.session ? 'Connected remotely. Restore real location before switching connections.' : `Using remote access. ${state.devices.length} phone${state.devices.length === 1 ? '' : 's'} found.`) : busy ? 'Checking the connection… Keep USB connected.' : phone ? 'Ready to switch. Ghost will check this same phone over Wi-Fi first.' : state.session?.status === 'active' && mode === 'wifi' ? 'Connected over Wi-Fi. Restore real location before returning to USB.' : state.session ? 'Retry or restore this phone’s session before switching.' : `Using ${mode === 'wifi' ? 'Wi-Fi' : 'USB'}. ${state.devices.length} phone${state.devices.length === 1 ? '' : 's'} found.`;
-  $('#wifi-handoff').hidden = !phone;
+  $('#remote-status').textContent = mode === 'remote'
+    ? (state.devices.length ? `Connected remotely to ${state.preferences.remoteHost}.` : `Looking for the iPhone at ${state.preferences.remoteHost}… Keep it on Wi-Fi with Tailscale on.`)
+    : state.preferences.remoteUdid && state.preferences.remoteHost ? 'Ready. Unplug the iPhone and choose Remote above.'
+    : 'Follow the steps below. Ticks show what’s done.';
+  const found = `${state.devices.length} phone${state.devices.length === 1 ? '' : 's'} found`;
+  $('#wifi-status').textContent = busy ? 'Working… Keep the phone unlocked.'
+    : state.session && !phone ? `Using ${modeLabel}. Restore real location before switching connections.`
+    : mode === 'remote' ? `Using Remote · ${found}.`
+    : `Using ${modeLabel} · ${found}.`;
+  // Only offer the switch while a location is live, or while following the iPhone Wi-Fi steps.
+  $('#wifi-handoff').hidden = !phone || (!state.session && $('#wifi-phone').value !== 'ios');
+  $('#wifi-handoff-note').hidden = !state.session;
   $('#switch-to-wifi').disabled = $('#wifi-prompt-switch').disabled = Boolean(busy);
   $('#wifi-prompt-android').hidden = $('#wifi-android-note').hidden = phone?.platform !== 'android';
   $('#wifi-prompt').hidden = !phone || state.session?.status !== 'active' || !state.network?.wifi || dismissedWifi.has(phone.id) || isPreview || !state.preferences.onboardingComplete;
@@ -553,8 +589,16 @@ function renderConnections() {
   const recoveringAndroid = state.session?.platform === 'android' && state.session?.connection === 'wifi' && ['waiting', 'unknown', 'error'].includes(state.session?.status);
   $('#wifi-pair-button').disabled = $('#wifi-connect-button').disabled = busy || (Boolean(state.session) && !recoveringAndroid) || mode !== 'wifi';
   $('#wifi-refresh').disabled = busy;
-  $('#wifi-ios').hidden = $('#wifi-phone').value !== 'ios';
-  $('#wifi-android').hidden = $('#wifi-phone').value !== 'android';
+  const guide = $('#wifi-phone').value;
+  $('#wifi-ios').hidden = guide !== 'ios';
+  $('#remote-access').hidden = guide !== 'ios-remote';
+  $('#wifi-android').hidden = guide !== 'android';
+  const steps = {
+    'usb-iphone': Boolean(selectedUsbIphone) || Boolean(state.preferences.remoteUdid),
+    paired: Boolean(state.preferences.remoteUdid),
+    host: Boolean(state.preferences.remoteHost),
+  };
+  document.querySelectorAll('.setup-checklist [data-step]').forEach(item => item.classList.toggle('done', steps[item.dataset.step] === true));
 }
 async function switchToWifi() {
   const phone = handoffPhone();
@@ -672,7 +716,7 @@ document.querySelectorAll('dialog').forEach((dialog) => dialog.addEventListener(
 $('#onboarding-dialog').addEventListener('cancel', (event) => { if (state.preferences.onboardingComplete !== true) event.preventDefault(); });
 
 $('#connection-options').onclick = () => {
-  $('#wifi-phone').value = setupPlatform || 'ios';
+  $('#wifi-phone').value = (state.preferences.connection === 'remote' || (state.preferences.remoteUdid && !state.preferences.remoteHost)) ? 'ios-remote' : (setupPlatform || 'ios');
   $('#wifi-manual').open = !handoffPhone();
   renderConnections();
   $('#wifi-dialog').showModal();
@@ -684,10 +728,10 @@ $('#wifi-dialog').addEventListener('close', () => { $('#wifi-pair-code').value =
 document.querySelectorAll('[data-connection]').forEach(button => {
   button.onclick = () => button.dataset.connection === 'wifi' && handoffPhone() ? switchToWifi() : runOperation(() => api.setConnection(button.dataset.connection));
 });
-$('#pair-remote').onclick = () => runOperation(() => api.pairRemote(selectedDeviceId), 'Remote access is set up for this iPhone. Enter its Tailscale address next.');
-$('#remote-host-form').onsubmit = (event) => { event.preventDefault(); runOperation(() => api.updatePreferences({ remoteHost: $('#remote-host').value.trim() }), 'Remote address saved.'); };
-$('#clear-remote-host').onclick = () => runOperation(() => api.updatePreferences({ remoteHost: null }), 'Remote address cleared.');
-$('#enable-iphone-wifi').onclick = () => runOperation(() => api.connectWifi({platform: 'ios', deviceId: selectedDeviceId}), 'Wi-Fi enabled. Choose Wi-Fi above to find your iPhone.');
+$('#pair-remote').onclick = () => runOperation(() => api.pairRemote(selectedDeviceId), 'Remote access is set up. Next, enter the iPhone’s Tailscale address.');
+$('#remote-host-form').onsubmit = (event) => { event.preventDefault(); runOperation(() => api.updatePreferences({ remoteHost: $('#remote-host').value.trim() }), 'Tailscale address saved.'); };
+$('#clear-remote-host').onclick = () => runOperation(() => api.updatePreferences({ remoteHost: null }), 'Tailscale address cleared.');
+$('#enable-iphone-wifi').onclick = () => runOperation(() => api.connectWifi({platform: 'ios', deviceId: selectedDeviceId}), 'Wireless access is set up. Join the same Wi-Fi, then choose Wi-Fi above.');
 $('#wifi-pair-form').onsubmit = async event => {
   event.preventDefault();
   const code = $('#wifi-pair-code').value;
