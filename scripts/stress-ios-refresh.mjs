@@ -91,6 +91,8 @@ class FakeTunnel:
         trace("tunnel-close")
 
 class FakeLockdown:
+    # Discovery reports the phone's own UDID (since cbea803); the fake must supply it.
+    udid = SERIAL
     all_values = {"DeviceName": "Stress fake iPhone"}
     product_type = "iPhoneFake"
     product_version = "26.0"

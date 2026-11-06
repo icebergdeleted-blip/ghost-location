@@ -1,5 +1,16 @@
 # Local validation
 
+## feature/offline-persistence — 2026-11-03, Windows 11 x64 (no phone connected)
+
+| Check | Result |
+| --- | --- |
+| `npm test` | 151 passed, 0 failed, 0 skipped, after `npm run runtime:android` provided `adb.exe`. Includes the Python sidecar suites (22 bridge and 4 probe tests) through `sidecar/.venv` with pymobiledevice3 11.12.4. |
+| `npm run test:native` | Passed: native UI, live search, live OSRM route (115 points, 2,652 m) at the 45 mph default, setup, preferences. No phone commands. |
+| `npm run test:offline-tiles` | Passed: map tiles drawn only from a generated MBTiles file while `tile.openstreetmap.org` was blocked; out-of-range tiles refused. |
+| `npm run test:renderer-session` | Fails on this PC at the 45 s overall deadline, **including on unmodified 0.1.7**. With a longer deadline, all assertions through the route-playback PASS line succeed, then a later `page.screenshot` call times out after 5 s. This is host speed, not a behaviour change. |
+| Persistence probe | Software only: `restore` with no phone reported `cleared:false` and kept the recovery record; `facts` reported that Apple USB services were missing. **No hardware results.** See `docs/persistence-findings.md`. |
+
+
 ## Public 0.1.5 native builds
 
 [GitHub Actions run 34771723845](https://github.com/Blueturboguy07/ghost-location/actions/runs/34771723845) passed on all three native targets at source commit `cb0ccc0ecb4c6168dfa996458b0a3b62e2081d4f`:

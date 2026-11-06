@@ -7,6 +7,11 @@ import { fileURLToPath } from 'node:url';
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
+/** The exact pymobiledevice3 version pinned in sidecar/requirements.txt, or null. */
+export function pinnedIosVersion(requirementsText) {
+  return String(requirementsText).match(/^pymobiledevice3==([^\s#]+)\s*$/m)?.[1] ?? null;
+}
+
 /** Inspect executable headers without running anything. Universal macOS ADB is supported. */
 export function supportsArchitecture(bytes, platform, arch, { allowWindowsX86 = false } = {}) {
   if (bytes.length < 64) return false;
@@ -83,7 +88,7 @@ export function validateResources({ root = projectRoot, platform = process.platf
   file(`${iosDir}/ghost-ios/_internal/base_library.zip`);
   file(`${iosDir}/build-dependencies.txt`);
   const iosInfo = json(`${iosDir}/build-info.json`);
-  const pinnedIos = file('sidecar/requirements.txt').toString('utf8').match(/^pymobiledevice3==([^\s]+)$/m)?.[1];
+  const pinnedIos = pinnedIosVersion(file('sidecar/requirements.txt').toString('utf8'));
   const bridgeSha256 = sha256(file('sidecar/ios_bridge.py'));
   if (!pinnedIos || iosInfo.target !== target || iosInfo.pymobiledevice3 !== pinnedIos || iosInfo.protocolVersion !== 1 ||
       iosInfo.bridgeSha256 !== bridgeSha256) {

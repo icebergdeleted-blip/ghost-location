@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.1.8 (pre-release)
+
+### Remote iPhone connection and phone control
+
+- Connect to an iPhone over RemotePairing on Wi-Fi, and remotely through Tailscale
+  (**Remote** mode). Set up once over USB with **Set up remote access**; **Find with
+  Tailscale** lists iPhones on the tailnet. Hardware-verified on iOS 27.0.1, including a
+  relayed path and an iPhone on a second phone's personal hotspot. Cellular alone is refused
+  by iOS, and the spoof reverts about a minute after the connection drops.
+- Pin pymobiledevice3 11.50.0; 11.12.4's RemotePairing proof is rejected by iOS 27.
+  The sidecar build now records the pinned version instead of a hard-coded one.
+- Desktop alerts when a live spoof loses or regains its connection.
+- Phone control (off by default): a map page served only on this computer's Tailscale
+  address, paired by a 6-digit code or QR link, with search, saved places, Set, Restore and
+  Open in Apple Maps. See `docs/phone-control.md`.
+- An unresolved session can move to the phone's current connection type; Set works for
+  Wi-Fi and Remote phones; long place names no longer push Restore off a phone screen.
+- macOS: declare `_remotepairing._tcp` for local-network discovery.
+
+### Offline features (first shipped in the v0.1.7-offline pre-release)
+
+- Add a manual iPhone persistence probe (`scripts/persistence-probe.mjs`,
+  `sidecar/persistence_probe.py`) and `docs/persistence-findings.md`. They test
+  whether a simulated location survives sidecar exit, transport close, unplug,
+  reboot and developer-image unmount, comparing DVT with the legacy
+  `com.apple.dt.simulatelocation` service. **Hardware result (iOS 27.0.1): a DVT
+  spoof reverts to the real location within a minute of unplugging, so Phase 2
+  persistence was not built.**
+  Ghost's disconnect behaviour is unchanged: no "persisting" state is added
+  until hardware results support it.
+- Adjustable route speed (1–120 mph, default 45 mph = 20.1168 m/s), also
+  applied to a running route.
+- Persist route geometry and progress (`route.json`). After a restart the route
+  comes back paused and resumes only through an explicit Resume. Restore deletes it.
+- Offline map: a local raster MBTiles file or `{z}/{x}/{y}` folder, served
+  through `ghost://app/tiles`, selected in Settings. Vector tiles are refused.
+- Configurable OSRM routing URL. Photon and OSRM accept plain HTTP only for
+  localhost or private LAN servers.
+- Wake lock decision moved to `backend/power.mjs`. It now also holds during
+  Restore (`stopping`) and while an automatic same-phone reconnect is pending.
+- Add `docs/architecture-notes.md` and `docs/offline-maps.md`.
+
 ## 0.1.7
 
 - Offer Switch to Wi-Fi after a working USB session when the computer has an active Wi-Fi interface.

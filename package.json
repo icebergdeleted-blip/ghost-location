@@ -1,6 +1,6 @@
 {
   "name": "ghost-location",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "description": "Choose a place. Set your phone's location over USB or Wi-Fi.",
   "author": "Ghost contributors",
@@ -16,6 +16,8 @@
     "test:ios-stream": "node scripts/stress-ios-refresh.mjs",
     "test:renderer-session": "npm run build && node scripts/check-renderer-session.mjs",
     "test:native": "npm run build && node scripts/smoke-electron.mjs",
+    "test:offline-tiles": "npm run build && node scripts/check-offline-tiles.mjs",
+    "probe:persistence": "node scripts/persistence-probe.mjs",
     "runtime:android": "node scripts/prepare-android.mjs",
     "runtime:ios": "node scripts/build-ios-sidecar.mjs",
     "runtime:prepare": "node scripts/prepare-runtime.mjs",
@@ -24,7 +26,8 @@
   },
   "dependencies": {
     "leaflet": "1.9.4",
-    "lucide": "^0.577.0"
+    "lucide": "^0.577.0",
+    "qrcode-generator": "2.0.4"
   },
   "devDependencies": {
     "electron": "44.3.0",
@@ -75,6 +78,7 @@
         "NSLocalNetworkUsageDescription": "Ghost connects to your trusted phone on the same Wi-Fi network to simulate locations.",
         "NSBonjourServices": [
           "_apple-mobdev2._tcp",
+          "_remotepairing._tcp",
           "_adb-tls-connect._tcp",
           "_adb-tls-pairing._tcp"
         ]

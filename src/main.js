@@ -8,6 +8,7 @@ import {
   ChevronLeft,
 } from 'lucide';
 import { createPreviewBridge } from './preview.js';
+import qrcode from 'qrcode-generator';
 
 const isPreview = !window.ghost;
 const detectedHost = /Windows/i.test(navigator.userAgent) ? 'windows' : 'mac';
@@ -119,7 +120,7 @@ $('#app').innerHTML = `
         </div>
         <button id="connection-badge" class="connection-badge"><span class="status-dot"></span><span id="connection-text">No phone connected</span>${icon('chevron-down')}</button>
       </div>
-      <div id="map-error" class="map-error" hidden>${icon('help-circle')}<span>Map tiles could not load. Coordinates still work.</span><button id="retry-map" class="text-button">Retry</button></div>
+      <div id="map-error" class="map-error" hidden>${icon('help-circle')}<span id="map-error-text">Map tiles could not load. Coordinates still work.</span><button id="retry-map" class="text-button">Retry</button><button id="offline-map-link" class="text-button">Offline map…</button></div>
       <div id="destination-callout" class="destination-callout" hidden></div>
       <div class="map-controls"><button id="recenter-button" class="map-button" aria-label="Center map on selected place" title="Center map">${icon('crosshair')}</button><div class="zoom-buttons"><button id="zoom-in" class="map-button" aria-label="Zoom in" title="Zoom in">${icon('plus')}</button><button id="zoom-out" class="map-button" aria-label="Zoom out" title="Zoom out">${icon('minus')}</button></div></div>
       <div class="map-bottom"><div id="session-status" class="session-status" role="status"></div></div>
@@ -140,9 +141,10 @@ $('#app').innerHTML = `
             <button id="add-route-stop" class="secondary-button">${icon('plus')} Add selected pin to route</button>
             <ol id="route-stops" class="route-stops"></ol>
             <div class="route-plan-actions"><button id="plan-route" class="secondary-button">Plan road route</button><button id="clear-route" class="text-button">Clear</button></div>
-            <p class="route-provider">Stops are sent to OSRM when you plan. Roads by OpenStreetMap. Internet required.</p>
+            <label class="route-speed"><span>Speed</span><input id="route-speed" type="number" min="1" max="120" step="1" inputmode="numeric" aria-label="Route speed in miles per hour" /><span>mph</span></label>
+            <p id="route-provider" class="route-provider">Stops are sent to OSRM when you plan. Roads by OpenStreetMap. Internet required.</p>
             <div id="route-summary" class="route-summary" hidden></div>
-            <button id="route-play" class="primary-button" disabled>Start route · 45 mph</button>
+            <button id="route-play" class="primary-button" disabled>Start route</button>
             <p id="route-hint" class="action-hint">Add a start and destination, in order.</p>
           </div>
           <div id="fixed-actions"><button id="apply-button" class="primary-button" disabled><span>Set location</span>${icon('arrow-up-right')}</button><p id="apply-hint" class="action-hint">Connect a phone to get started.</p></div><button id="restore-button" class="restore-button" disabled>${icon('rotate-ccw')} Restore real location</button>
@@ -160,45 +162,100 @@ $('#app').innerHTML = `
   </dialog>
 
   <dialog id="wifi-dialog" class="sheet-dialog" aria-labelledby="wifi-title">
-    <div class="sheet-heading"><div><span class="eyebrow">Phone connection</span><h2 id="wifi-title">Connect over Wi-Fi</h2></div><button class="icon-button" data-close="wifi-dialog" aria-label="Close connection settings">${icon('x')}</button></div>
-    <p class="sheet-intro">Keep your phone and computer on the same Wi-Fi network. Leave the cable connected until Ghost confirms the switch.</p>
-    <div class="location-modes" role="group" aria-label="Connection method"><button data-connection="usb">USB cable</button><button data-connection="wifi">Wi-Fi</button></div>
-    <p id="wifi-status" class="settings-note" role="status"></p>
-    <div id="wifi-handoff" class="settings-group" hidden><button id="switch-to-wifi" class="primary-button">Switch to Wi-Fi</button><p class="settings-note">Your current location carries over. A running route pauses during the switch and continues once connected.</p><p id="wifi-android-note" class="settings-note" hidden>This enables Android network debugging on port 5555. Use a trusted network; restart the phone to turn it off.</p></div>
-    <details id="wifi-manual"><summary>Manual setup and troubleshooting</summary>
-    <label class="field-label" for="wifi-phone">Your phone</label><select id="wifi-phone" class="text-input"><option value="ios">iPhone · iOS 17.4+</option><option value="android">Android · Android 11+</option></select>
-    <div id="wifi-ios" class="settings-group">
-      <h3>Pair once by cable</h3>
-      <ol class="wifi-steps"><li>Choose USB cable above. Connect and unlock your iPhone, trust this computer and enable Developer Mode. On Windows, install Apple Devices first.</li><li>Select your iPhone in the main Phone menu, then choose Switch to Wi-Fi above.</li><li>Choose Wi-Fi above. Wait for the phone to appear, then unplug the cable. You can now set a location or start a route.</li></ol>
-      <button id="enable-iphone-wifi" class="secondary-button">Enable Wi-Fi for selected iPhone</button>
-      <p class="settings-note">If discovery fails, enable “Show this iPhone when on Wi-Fi” in Finder on Mac, or “Show this device when on Wi-Fi” in Apple Devices on Windows, and apply. Unlock the phone and refresh.</p>
+    <div class="sheet-heading"><div><span class="eyebrow">Connection</span><h2 id="wifi-title">How Ghost reaches your phone</h2></div><button class="icon-button" data-close="wifi-dialog" aria-label="Close connection settings">${icon('x')}</button></div>
+    <div class="connection-modes" role="group" aria-label="Connection method">
+      <button data-connection="usb"><strong>USB cable</strong><small>Plugged into this computer. Most reliable.</small></button>
+      <button data-connection="wifi"><strong>Wi-Fi</strong><small>Phone and computer on the same Wi-Fi.</small></button>
+      <button data-connection="remote"><strong>Remote</strong><small>iPhone anywhere, through Tailscale.</small></button>
     </div>
+    <p id="wifi-status" class="connection-status" role="status"></p>
+    <div id="wifi-handoff" class="settings-group" hidden><button id="switch-to-wifi" class="primary-button">Switch to Wi-Fi</button><p id="wifi-handoff-note" class="settings-note">Your current location carries over. A running route pauses during the switch and continues once connected.</p><p id="wifi-android-note" class="settings-note" hidden>This turns on Android network debugging (port 5555). Use a trusted network; restarting the phone turns it off.</p></div>
+
+    <details id="wifi-manual" class="setup-guide"><summary>Setup steps</summary>
+    <label class="field-label" for="wifi-phone">Show steps for</label>
+    <select id="wifi-phone" class="text-input"><option value="ios">iPhone on Wi-Fi</option><option value="ios-remote">iPhone remote (Tailscale)</option><option value="android">Android on Wi-Fi</option></select>
+
+    <div id="wifi-ios" class="settings-group">
+      <p class="guide-intro">One-time setup by cable, then no cable while you’re on the same Wi-Fi as this computer.</p>
+      <ol class="setup-checklist">
+        <li data-step="usb-iphone"><strong>Plug in and select your iPhone</strong><span>Choose <em>USB cable</em> above, unlock the iPhone and tap Trust if asked. Select it in the Phone list.</span></li>
+        <li data-step="paired"><strong>Set up wireless access</strong><span>Ghost turns on Wi-Fi access and pairs this computer with the iPhone. No prompt appears on the phone.</span><button id="enable-iphone-wifi" class="secondary-button compact">Set up wireless access</button></li>
+        <li><strong>Join the same Wi-Fi and switch</strong><span>Put both on the same Wi-Fi network, choose <em>Wi-Fi</em> above, wait for the iPhone to appear, then unplug.</span></li>
+      </ol>
+    </div>
+
+    <div id="remote-access" class="settings-group" hidden>
+      <p class="guide-intro">Control your iPhone from anywhere on your Tailscale network: for example, the computer at home and the iPhone with you.</p>
+      <p id="remote-status" class="connection-status" role="status"></p>
+      <ol class="setup-checklist">
+        <li data-step="usb-iphone"><strong>Plug in and select your iPhone</strong><span>Choose <em>USB cable</em> above and select the iPhone in the Phone list. Install Tailscale on the iPhone and this computer, signed in to the same account.</span></li>
+        <li data-step="paired"><strong>Set up remote access</strong><span>One time per computer. It shows on the iPhone under Settings › Developer › Paired Computers, where you can remove it.</span><button id="pair-remote" class="secondary-button compact">Set up remote access</button></li>
+        <li data-step="host"><strong>Enter the iPhone’s Tailscale address</strong><span>Ghost can look it up from Tailscale on this computer. Otherwise copy it from the Tailscale app on the iPhone; it starts with 100.</span>
+          <div class="inline-form"><button id="find-tailscale" type="button" class="secondary-button compact">Find with Tailscale</button><span class="field-hint">or type it below</span></div>
+          <div id="tailscale-results" class="tailscale-results" hidden></div>
+          <form id="remote-host-form" class="inline-form"><input id="remote-host" class="text-input" placeholder="100.101.102.103" autocomplete="off" spellcheck="false" aria-label="iPhone Tailscale address" /><button type="submit" class="secondary-button compact">Save</button><button id="clear-remote-host" type="button" class="text-button">Clear</button></form></li>
+        <li><strong>Unplug and choose Remote</strong><span>Keep the iPhone on any Wi-Fi with Tailscale on, then choose <em>Remote</em> above.</span></li>
+      </ol>
+      <ul class="guide-notes">
+        <li><strong>Wi-Fi required:</strong> any network works, but the iPhone must be joined to one. Cellular alone does not work; away from Wi-Fi, join a hotspot from a second phone.</li>
+        <li><strong>Stays only while connected:</strong> if the connection drops, the iPhone returns to its real location within about a minute.</li>
+        <li><strong>After the iPhone restarts:</strong> plug it in once and choose <em>Prepare</em>.</li>
+      </ul>
+    </div>
+
     <div id="wifi-android" class="settings-group" hidden>
-      <h3>Pair with Wireless debugging</h3>
-      <p class="settings-note">Choose Wi-Fi above. On Android 11 or later, enable Developer options (tap Build number seven times), then open Wireless debugging → Pair device with pairing code. Keep this screen open. No USB cable is needed.</p>
-      <form id="wifi-pair-form" class="wifi-form">
-        <label class="field-label" for="wifi-pair-address">Pairing IP address and port</label><input id="wifi-pair-address" class="text-input" placeholder="192.168.1.20:37123" autocomplete="off" required />
-        <label class="field-label" for="wifi-pair-code">Six-digit pairing code</label><input id="wifi-pair-code" class="text-input" type="password" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="off" required />
-        <button id="wifi-pair-button" type="submit" class="secondary-button">Pair phone</button>
-      </form>
-      <form id="wifi-connect-form" class="wifi-form">
-        <label class="field-label" for="wifi-connect-address">Connection IP address and port</label><input id="wifi-connect-address" class="text-input" placeholder="192.168.1.20:40567" autocomplete="off" required />
-        <p class="settings-note">After pairing, go back to the main Wireless debugging screen and use its IP address and port here. This port is different from the pairing port and may change after reconnecting.</p>
-        <button id="wifi-connect-button" type="submit" class="secondary-button">Connect paired phone</button>
-      </form>
-      <p class="settings-note">Once connected, close this panel and choose Prepare if needed. Keep Location on and select Appium Settings as the mock location app. Android 8–10 can switch from an authorized USB connection.</p>
+      <p class="guide-intro">Android 11 or later. No cable needed. Choose <em>Wi-Fi</em> above first.</p>
+      <ol class="setup-checklist">
+        <li><strong>Turn on Wireless debugging</strong><span>Settings › About phone › tap Build number seven times. Then Developer options › Wireless debugging › Pair device with pairing code. Keep that screen open.</span></li>
+        <li><strong>Pair</strong><span>Enter the pairing address and six-digit code shown on the phone.</span>
+          <form id="wifi-pair-form" class="wifi-form">
+            <label class="field-label" for="wifi-pair-address">Pairing IP address and port</label><input id="wifi-pair-address" class="text-input" placeholder="192.168.1.20:37123" autocomplete="off" required />
+            <label class="field-label" for="wifi-pair-code">Six-digit pairing code</label><input id="wifi-pair-code" class="text-input" type="password" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="off" required />
+            <button id="wifi-pair-button" type="submit" class="secondary-button compact">Pair phone</button>
+          </form></li>
+        <li><strong>Connect</strong><span>Go back to the main Wireless debugging screen and use the IP address and port shown there. It differs from the pairing port.</span>
+          <form id="wifi-connect-form" class="wifi-form">
+            <label class="field-label" for="wifi-connect-address">Connection IP address and port</label><input id="wifi-connect-address" class="text-input" placeholder="192.168.1.20:40567" autocomplete="off" required />
+            <button id="wifi-connect-button" type="submit" class="secondary-button compact">Connect paired phone</button>
+          </form></li>
+        <li><strong>Prepare</strong><span>Close this panel, select the phone and choose Prepare. Pick Appium Settings as the mock location app if Android asks.</span></li>
+      </ol>
     </div>
     </details>
-    <p class="settings-note">Allow Ghost and its device tools through your computer’s local-network/firewall prompts. Guest Wi-Fi, client isolation and some VPNs can prevent devices from finding each other. Keep Ghost open; restore real location before disconnecting.</p>
+
+    <details class="setup-guide"><summary>Not finding your phone?</summary>
+      <ul class="guide-notes">
+        <li>Unlock the phone and keep the screen on while Ghost searches.</li>
+        <li>Allow Ghost and its device tools through firewall and local-network prompts.</li>
+        <li>Guest Wi-Fi, campus networks and some VPNs keep devices apart. Use a home network, your computer’s hotspot, or Remote.</li>
+        <li>Restore real location before switching connections or unplugging.</li>
+      </ul>
+    </details>
     <div class="dialog-actions"><button id="wifi-refresh" class="primary-button">Refresh phones</button></div>
   </dialog>
 
   <dialog id="settings-dialog" class="sheet-dialog" aria-labelledby="settings-title">
     <div class="sheet-heading"><div><span class="eyebrow">Ghost</span><h2 id="settings-title">Settings</h2></div><button class="icon-button" data-close="settings-dialog" aria-label="Close settings">${icon('x')}</button></div>
     <div class="settings-group"><h3>Device setup</h3><div class="configuration-row"><div><strong id="settings-configuration">No setup selected</strong><small>Ghost uses this to show the right connection steps.</small></div><button id="rerun-onboarding" class="secondary-button compact">Change</button></div></div>
+    <div class="settings-group" id="phone-control-group"><h3>Phone control</h3>
+      <label class="setting-row"><span><strong>Control Ghost from your phone</strong><small>Open a page on your phone, over Tailscale only, to set or restore locations while away from this computer. Off by default.</small></span><input id="phone-control-toggle" type="checkbox" class="switch" /></label>
+      <div id="phone-control-details" hidden>
+        <p class="settings-note">On your phone (with Tailscale on), open:</p>
+        <div class="inline-form"><code id="phone-control-url" class="url-box"></code><button id="phone-control-copy" type="button" class="text-button">Copy</button></div>
+        <p id="phone-control-ip" class="settings-note"></p>
+        <div class="inline-form"><button id="phone-control-pair" type="button" class="secondary-button compact">Pair a phone</button></div>
+        <div id="phone-control-qr-box" class="qr-box" hidden><div id="phone-control-qr" class="qr" role="img" aria-label="QR code that opens Ghost on your phone and pairs it"></div><div><strong>Scan with your iPhone camera</strong><small>It opens Ghost and pairs in one step. Or type this code on the phone:</small><span id="phone-control-code" class="pair-code" aria-live="polite"></span></div></div>
+        <p id="phone-control-info" class="settings-note"></p>
+        <button id="phone-control-revoke" type="button" class="text-button danger-text">Sign out all phones</button>
+      </div>
+      <p id="phone-control-error" class="settings-note error-text" role="alert"></p>
+    </div>
     <div class="settings-group"><h3>Location sessions</h3><label class="setting-row"><span><strong>Restore on quit</strong><small>Ghost tries to stop location simulation before it closes. Keep the phone connected.</small></span><input id="restore-preference" type="checkbox" class="switch" /></label></div>
     <div class="settings-group"><h3>Device tools</h3><div id="runtime-status"></div><button id="install-runtime" class="secondary-button">${icon('download')} Prepare device tools</button><p class="settings-note">First-time preparation may need an internet connection.</p></div>
-    <form id="provider-form" class="settings-group"><h3>Place search</h3><label class="field-label" for="provider-url">Photon-compatible endpoint</label><input id="provider-url" class="text-input" type="url" required placeholder="https://photon.komoot.io/api/" /><p class="settings-note">Search runs only when you submit. Map tiles come from OpenStreetMap.</p><div class="button-row"><button type="submit" class="secondary-button compact">Save endpoint</button><button id="reset-provider" type="button" class="text-button">Reset</button></div></form><div class="settings-footer">Ghost 0.1.7 · Free and open source</div>
+    <form id="provider-form" class="settings-group"><h3>Place search</h3><label class="field-label" for="provider-url">Photon-compatible endpoint</label><input id="provider-url" class="text-input" type="url" required placeholder="https://photon.komoot.io/api/" /><p class="settings-note">Search runs only when you submit. Plain HTTP is allowed only for a server on this computer or your private network.</p><div class="button-row"><button type="submit" class="secondary-button compact">Save endpoint</button><button id="reset-provider" type="button" class="text-button">Reset</button></div></form>
+    <form id="routing-form" class="settings-group"><h3>Road routing</h3><label class="field-label" for="routing-url">OSRM-compatible routing URL</label><input id="routing-url" class="text-input" type="url" required placeholder="https://router.project-osrm.org/" /><p class="settings-note">Used only when you choose Plan road route. For offline planning, run your own OSRM server and enter its address, for example http://localhost:5000/.</p><div class="button-row"><button type="submit" class="secondary-button compact">Save routing URL</button><button id="reset-routing" type="button" class="text-button">Reset</button></div></form>
+    <div class="settings-group"><h3>Map tiles</h3><p id="tile-status" class="settings-note" role="status">Online map from OpenStreetMap.</p><div class="button-row wrap"><button id="tiles-online" type="button" class="secondary-button compact">Use online map</button><button id="tiles-mbtiles" type="button" class="secondary-button compact">Choose MBTiles file…</button><button id="tiles-folder" type="button" class="secondary-button compact">Choose tile folder…</button></div><p class="settings-note">Offline maps use raster tiles you prepare yourself (see docs/offline-maps.md). Without tiles, search, pins and coordinate entry still work.</p></div>
+    <div class="settings-footer">Ghost 0.1.7 · Free and open source</div>
   </dialog>
 
   <dialog id="save-dialog" class="small-dialog" aria-labelledby="save-title"><div class="sheet-heading"><div><span class="eyebrow">Saved place</span><h2 id="save-title">Save this place</h2></div><button class="icon-button" data-close="save-dialog" aria-label="Close save place">${icon('x')}</button></div><form id="save-form"><label class="field-label" for="place-name">Name</label><input id="place-name" class="text-input" maxlength="120" required placeholder="Place name" /><input id="place-id" type="hidden" /><p id="save-coordinates" class="settings-note"></p><button class="primary-button" type="submit"><span>Save place</span>${icon('bookmark')}</button></form></dialog>
@@ -207,10 +264,32 @@ $('#app').innerHTML = `
 
 const map = L.map('map', { zoomControl: false, attributionControl: true, minZoom: 2, maxZoom: 19, worldCopyJump: true }).setView([41.8827, -87.6233], 13);
 map.attributionControl.setPrefix(false);
-const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors', keepBuffer: 1, updateWhenIdle: true }).addTo(map);
-let tileErrors = 0;
-tiles.on('tileerror', () => { if (++tileErrors >= 3) $('#map-error').hidden = false; });
-tiles.on('tileload', () => { tileErrors = 0; $('#map-error').hidden = true; });
+const osmAttribution = '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors';
+let tiles = null, tileErrors = 0, tileInfo = { kind: 'online' };
+function useTiles(info = { kind: 'online' }) {
+  tileInfo = info?.kind && info.kind !== 'online' && !info.error ? info : { kind: 'online', error: info?.error };
+  if (tiles) tiles.remove();
+  const offline = tileInfo.kind !== 'online';
+  // Offline tiles are served by the desktop process from the chosen local file only.
+  tiles = L.tileLayer(offline ? 'ghost://app/tiles/{z}/{x}/{y}' : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, ...(offline ? { minNativeZoom: tileInfo.minzoom, maxNativeZoom: Math.min(19, tileInfo.maxzoom) } : {}),
+    attribution: offline ? esc(tileInfo.attribution || `Offline tiles · ${tileInfo.name}`) : osmAttribution, keepBuffer: 1, updateWhenIdle: true,
+  }).addTo(map);
+  tiles.bringToBack();
+  tileErrors = 0; $('#map-error').hidden = true;
+  $('#map-error-text').textContent = offline ? 'Offline tiles are missing for this area or zoom. Coordinates still work.' : 'Map tiles could not load. Coordinates still work.';
+  tiles.on('tileerror', () => { if (++tileErrors >= 3) $('#map-error').hidden = false; });
+  tiles.on('tileload', () => { tileErrors = 0; $('#map-error').hidden = true; });
+  renderTileStatus();
+}
+function renderTileStatus() {
+  const element = $('#tile-status');
+  if (!element) return;
+  element.textContent = tileInfo.kind === 'online'
+    ? `${tileInfo.error ? `Offline tiles unavailable (${tileInfo.error}). ` : ''}Online map from OpenStreetMap. Needs internet.`
+    : `Offline ${tileInfo.kind === 'mbtiles' ? 'MBTiles' : 'tile folder'}: ${tileInfo.name} · zoom ${tileInfo.minzoom}–${tileInfo.maxzoom}. No internet needed for the map.`;
+}
+useTiles();
 const pinIcon = L.divIcon({ className: 'ghost-map-pin', html: '<div class="pin-halo"></div><div class="pin-head"><span></span></div>', iconSize: [48, 58], iconAnchor: [24, 54] });
 let marker = null;
 
@@ -237,7 +316,8 @@ function acceptState(next) {
   render();
   if (!selectedPlace && state.session && Number.isFinite(state.session.latitude) && Number.isFinite(state.session.longitude)) selectPlace(state.session);
   if (state.warning && state.warning !== lastWarning) { lastWarning = state.warning; notify(state.warning, true); }
-  if (!onboardingShown && state.preferences.onboardingComplete !== true) {
+  // `false` only once saved settings have loaded; `undefined` means Ghost is still starting.
+  if (!onboardingShown && state.preferences.onboardingComplete === false) {
     onboardingShown = true;
     requestAnimationFrame(() => openOnboarding());
   }
@@ -302,7 +382,7 @@ function renderDevices() {
   }
   const device = selectedDevice || state.devices[0];
   const deviceStatus = { ready: 'Ready', 'setup-required': 'Setup needed', unauthorized: 'Trust this computer', offline: 'Disconnected' }[device.state] || 'Check connection';
-  setContent('#device-area', `<div class="device-card ${device.state === 'ready' ? 'ready' : ''}"><div class="device-card-top">${icon('smartphone')}<div class="device-select-wrap"><label class="sr-only" for="device-select">Connected phone</label><select id="device-select">${state.devices.map((phone) => `<option value="${esc(phone.id)}" ${phone.id === selectedDeviceId ? 'selected' : ''}>${esc(phone.name || platformName(phone.platform))}</option>`).join('')}</select><span>${esc(platformName(device.platform))}${device.osVersion ? ` ${esc(device.osVersion)}` : ''} · ${device.connection === 'wifi' ? 'Wi-Fi' : 'USB'}</span></div>${icon('chevron-down')}</div><div class="device-card-state"><span class="status-dot"></span><span>${deviceStatus}</span>${device.state === 'ready' ? icon('check') : `<button id="prepare-device" class="text-button" ${pending ? 'disabled' : ''}>${device.state === 'setup-required' ? 'Prepare' : 'Help'} ${icon('arrow-right')}</button>`}</div></div>${device.detail ? `<p class="device-detail">${esc(device.detail)}</p>` : ''}`);
+  setContent('#device-area', `<div class="device-card ${device.state === 'ready' ? 'ready' : ''}"><div class="device-card-top">${icon('smartphone')}<div class="device-select-wrap"><label class="sr-only" for="device-select">Connected phone</label><select id="device-select">${state.devices.map((phone) => `<option value="${esc(phone.id)}" ${phone.id === selectedDeviceId ? 'selected' : ''}>${esc(phone.name || platformName(phone.platform))}</option>`).join('')}</select><span>${esc(platformName(device.platform))}${device.osVersion ? ` ${esc(device.osVersion)}` : ''} · ${device.connection === 'remote' ? 'Remote' : device.connection === 'wifi' ? 'Wi-Fi' : 'USB'}</span></div>${icon('chevron-down')}</div><div class="device-card-state"><span class="status-dot"></span><span>${deviceStatus}</span>${device.state === 'ready' ? icon('check') : `<button id="prepare-device" class="text-button" ${pending ? 'disabled' : ''}>${device.state === 'setup-required' ? 'Prepare' : 'Help'} ${icon('arrow-right')}</button>`}</div></div>${device.detail ? `<p class="device-detail">${esc(device.detail)}</p>` : ''}`);
   $('#device-select').onchange = (event) => { selectedDeviceId = event.target.value; render(); };
   $('#device-select').onblur = () => { renderDevices(); paintIcons(); };
   if ($('#prepare-device')) $('#prepare-device').onclick = () => {
@@ -327,7 +407,8 @@ function renderActions() {
   const otherSession = state.session && state.session.deviceId !== selectedDeviceId;
   const retry = ['unknown', 'error', 'waiting'].includes(status) && !otherSession;
   const reconnectIOS = Boolean(state.session) && !otherSession && device?.platform === 'ios' && device.state === 'setup-required';
-  const canApply = device?.connection === 'usb' && (device.state === 'ready' || reconnectIOS);
+  // Any connection Ghost is currently using (USB, Wi-Fi or Remote); the backend re-checks the match.
+  const canApply = device?.connection === (state.preferences.connection || 'usb') && (device.state === 'ready' || reconnectIOS);
   const label = pendingAction === 'restore' ? 'Stopping…' : status === 'reconnecting' ? 'Reconnecting…' : busy ? 'Working…' : reconnectIOS || (retry && status === 'waiting') ? 'Reconnect & set location' : retry ? 'Retry location' : status === 'active' ? 'Update location' : 'Set location';
   $('#apply-button').disabled = busy || !selectedPlace || !canApply || Boolean(otherSession);
   setContent('#apply-button', `<span>${label}</span>${icon(busy ? 'loader-circle' : retry ? 'refresh-cw' : 'arrow-up-right', busy ? 'spin' : '')}`);
@@ -340,6 +421,7 @@ function placeItem(place) {
   return `<div class="saved-place"><button class="saved-place-main" data-place="${esc(place.id)}">${icon('map-pin')}<span><strong>${esc(place.label)}</strong><small>${Number(place.latitude).toFixed(4)}, ${Number(place.longitude).toFixed(4)}</small></span></button><div class="saved-place-actions"><button class="icon-button" data-edit="${esc(place.id)}" aria-label="Rename ${esc(place.label)}" title="Rename">${icon('pencil')}</button><button class="icon-button" data-delete="${esc(place.id)}" aria-label="Remove ${esc(place.label)}" title="Remove">${icon('trash-2')}</button></div></div>`;
 }
 
+const routeSpeed = () => state.route?.speedMph ?? state.preferences?.routeSpeedMph ?? 45;
 const routeTime = seconds => seconds < 60 ? `${Math.ceil(seconds)} sec` : seconds < 3600 ? `${Math.ceil(seconds / 60)} min` : `${Math.floor(seconds / 3600)} hr ${Math.ceil(seconds % 3600 / 60)} min`;
 function fitRoute() {
   if (routeLine) map.fitBounds(routeLine.getBounds(), { paddingTopLeft: [390, 95], paddingBottomRight: [85, 160], maxZoom: 16 });
@@ -378,12 +460,17 @@ function renderRoute() {
     routeStops.splice(Number(button.dataset.removeStop), 1); routePlan = null; drawRoute(); renderRoute(); paintIcons();
   }; });
   $('#route-summary').hidden = !routePlan;
-  if (routePlan) setContent('#route-summary', `<div><strong>${(routePlan.distanceMeters / 1609.344).toFixed(2)} miles</strong><span>45 mph · 1 sec updates</span></div><progress aria-label="Route progress" max="${routePlan.distanceMeters}" value="${route?.traveledMeters || 0}"></progress><p>${route?.status === 'completed' ? 'Arrived at destination' : `${routeTime(route?.remainingSeconds ?? routePlan.durationSeconds)} ${active ? 'remaining' : 'at 45 mph'}`}</p>`);
+  const mph = routeSpeed();
+  if (routePlan) setContent('#route-summary', `<div><strong>${(routePlan.distanceMeters / 1609.344).toFixed(2)} miles</strong><span>${mph} mph · 1 sec updates</span></div><progress aria-label="Route progress" max="${routePlan.distanceMeters}" value="${route?.traveledMeters || 0}"></progress><p>${route?.status === 'completed' ? 'Arrived at destination' : `${routeTime(route?.remainingSeconds ?? routePlan.distanceMeters / (mph * 0.44704))} ${active ? 'remaining' : `at ${mph} mph`}`}</p>`);
+  if (document.activeElement !== $('#route-speed')) $('#route-speed').value = mph;
+  $('#route-speed').disabled = busy || route?.status === 'completed';
+  const routingHost = (() => { try { return new URL(state.preferences.routingUrl || 'https://router.project-osrm.org/').host; } catch { return 'router.project-osrm.org'; } })();
+  $('#route-provider').textContent = routingHost === 'router.project-osrm.org' ? 'Stops are sent to OSRM when you plan. Roads by OpenStreetMap. Internet required.' : `Stops are sent to your routing server (${routingHost}) when you plan.`;
   const device = state.devices.find(d => d.id === selectedDeviceId);
   const otherSession = state.session && state.session.deviceId !== selectedDeviceId;
   const running = route?.status === 'running', paused = route?.status === 'paused';
   $('#route-play').disabled = busy || (active ? !running && (!paused || !device || otherSession || !['ready', 'setup-required'].includes(device.state)) : !routePlan || device?.state !== 'ready' || Boolean(otherSession));
-  $('#route-play').textContent = busy ? 'Working…' : running ? 'Pause route' : paused ? 'Resume route · 45 mph' : route?.status === 'completed' ? 'Route completed' : 'Start route · 45 mph';
+  $('#route-play').textContent = busy ? 'Working…' : running ? 'Pause route' : paused ? `Resume route · ${mph} mph` : route?.status === 'completed' ? 'Route completed' : `Start route · ${mph} mph`;
   $('#route-hint').textContent = active ? route.message : otherSession ? 'Restore the current session before switching phones.' : !routePlan ? 'Add a start and destination, then plan the route.' : !device ? 'Connect a phone to start. The route is ready.' : 'Start moves your phone to the first stop, then follows the road.';
   if (route?.point && inRoute) {
     const point = [route.point.latitude, route.point.longitude];
@@ -423,7 +510,7 @@ function renderSession() {
   const recovering = ['waiting', 'unknown', 'error'].includes(session?.status);
   const recoveryText = recovering ? `<span class="session-recovery">${session.autoReconnect ? 'Ghost will retry this phone automatically. Restore cancels retry.' : 'Reconnect this phone, then retry or restore.'}</span>` : '';
   const statusIcon = session?.status === 'reconnecting' ? 'refresh-cw' : session ? ['unknown', 'error', 'waiting'].includes(session.status) ? 'help-circle' : 'map-pin' : 'circle';
-  setContent('#session-status', `<span class="session-status-icon">${icon(statusIcon, session?.status === 'reconnecting' ? 'spin' : '')}</span><div><strong>${session ? session.status === 'active' && state.route ? ({ running: 'Following route · 45 mph', paused: 'Route paused', completed: 'Arrived', starting: 'Starting route…' }[state.route.status]) : labels[session.status] || 'Session needs attention' : 'Ready'}</strong><span>${esc(state.route?.message || session?.message || (session ? session.label || 'Keep your phone connected.' : state.devices.some((device) => device.state === 'ready') ? 'Choose a place to begin.' : 'Connect a phone and choose a place.'))}</span>${recoveryText}${refreshText}</div>${session?.status === 'active' ? '<span class="live-tag"><span></span>Active</span>' : ''}`);
+  setContent('#session-status', `<span class="session-status-icon">${icon(statusIcon, session?.status === 'reconnecting' ? 'spin' : '')}</span><div><strong>${session ? session.status === 'active' && state.route ? ({ running: `Following route · ${routeSpeed()} mph`, paused: state.route.restored ? 'Saved route paused' : 'Route paused', completed: 'Arrived', starting: 'Starting route…' }[state.route.status]) : labels[session.status] || 'Session needs attention' : 'Ready'}</strong><span>${esc(state.route?.message || session?.message || (session ? session.label || 'Keep your phone connected.' : state.devices.some((device) => device.state === 'ready') ? 'Choose a place to begin.' : 'Connect a phone and choose a place.'))}</span>${recoveryText}${refreshText}</div>${session?.status === 'active' ? '<span class="live-tag"><span></span>Active</span>' : ''}`);
 }
 
 function renderRuntime() {
@@ -479,7 +566,7 @@ function renderView() {
   $('#saved-nav-button').setAttribute('aria-pressed', String(showingSaved));
   $('#panel-eyebrow').textContent = showingSaved ? 'Library' : 'Location';
   $('#panel-title').textContent = showingSaved ? 'Saved places' : locationMode === 'route' ? 'Follow a route' : 'Set a location';
-  $('#panel-subtitle').textContent = showingSaved ? 'Select a place to return to the map.' : locationMode === 'route' ? 'Choose stops. Move along the road at 45 mph.' : 'Choose a phone and a point on the map.';
+  $('#panel-subtitle').textContent = showingSaved ? 'Select a place to return to the map.' : locationMode === 'route' ? `Choose stops. Move along the road at ${routeSpeed()} mph.` : 'Choose a phone and a point on the map.';
 }
 
 function handoffPhone() {
@@ -490,13 +577,32 @@ function handoffPhone() {
 function renderConnections() {
   const mode = state.preferences.connection || 'usb';
   const busy = pending || state.busy, phone = handoffPhone();
-  $('#connection-options').textContent = `Connection: ${mode === 'wifi' ? 'Wi-Fi' : 'USB'} · Change`;
+  const modeLabel = mode === 'remote' ? 'Remote' : mode === 'wifi' ? 'Wi-Fi' : 'USB';
+  // An unresolved record may move to another connection to be restored there; a live one may not.
+  const liveSession = Boolean(state.session) && !['unknown', 'waiting', 'error'].includes(state.session.status);
+  $('#connection-options').textContent = `Connection: ${modeLabel} · Change`;
   document.querySelectorAll('[data-connection]').forEach(button => {
     button.setAttribute('aria-pressed', String(button.dataset.connection === mode));
-    button.disabled = busy || (button.dataset.connection !== mode && Boolean(state.session) && !phone);
+    button.disabled = busy || (button.dataset.connection !== mode && liveSession && !phone) ||
+      (button.dataset.connection === 'remote' && mode !== 'remote' && !(state.preferences.remoteHost && state.preferences.remoteUdid));
   });
-  $('#wifi-status').textContent = busy ? 'Checking the connection… Keep USB connected.' : phone ? 'Ready to switch. Ghost will check this same phone over Wi-Fi first.' : state.session?.status === 'active' && mode === 'wifi' ? 'Connected over Wi-Fi. Restore real location before returning to USB.' : state.session ? 'Retry or restore this phone’s session before switching.' : `Using ${mode === 'wifi' ? 'Wi-Fi' : 'USB'}. ${state.devices.length} phone${state.devices.length === 1 ? '' : 's'} found.`;
-  $('#wifi-handoff').hidden = !phone;
+  document.querySelector('[data-connection="remote"]').title = state.preferences.remoteHost && state.preferences.remoteUdid ? '' : 'Finish the Remote setup steps first.';
+  const selectedUsbIphone = state.devices.find(device => device.id === selectedDeviceId && device.platform === 'ios' && device.connection === 'usb');
+  $('#pair-remote').disabled = busy || isPreview || mode !== 'usb' || !selectedUsbIphone || Boolean(state.session);
+  if (document.activeElement !== $('#remote-host')) $('#remote-host').value = state.preferences.remoteHost || '';
+  $('#remote-status').textContent = mode === 'remote'
+    ? (state.devices.length ? `Connected remotely to ${state.preferences.remoteHost}.` : `Looking for the iPhone at ${state.preferences.remoteHost}… Keep it on Wi-Fi with Tailscale on.`)
+    : state.preferences.remoteUdid && state.preferences.remoteHost ? 'Ready. Unplug the iPhone and choose Remote above.'
+    : 'Follow the steps below. Ticks show what’s done.';
+  const found = `${state.devices.length} phone${state.devices.length === 1 ? '' : 's'} found`;
+  $('#wifi-status').textContent = busy ? 'Working… Keep the phone unlocked.'
+    : liveSession && !phone ? `Using ${modeLabel}. Restore real location before switching connections.`
+    : state.session ? `Using ${modeLabel}. A previous location needs attention: switch to where the phone is now, then Retry or Restore.`
+    : mode === 'remote' ? `Using Remote · ${found}.`
+    : `Using ${modeLabel} · ${found}.`;
+  // Only offer the switch while a location is live, or while following the iPhone Wi-Fi steps.
+  $('#wifi-handoff').hidden = !phone || (!state.session && $('#wifi-phone').value !== 'ios');
+  $('#wifi-handoff-note').hidden = !state.session;
   $('#switch-to-wifi').disabled = $('#wifi-prompt-switch').disabled = Boolean(busy);
   $('#wifi-prompt-android').hidden = $('#wifi-android-note').hidden = phone?.platform !== 'android';
   $('#wifi-prompt').hidden = !phone || state.session?.status !== 'active' || !state.network?.wifi || dismissedWifi.has(phone.id) || isPreview || !state.preferences.onboardingComplete;
@@ -504,8 +610,16 @@ function renderConnections() {
   const recoveringAndroid = state.session?.platform === 'android' && state.session?.connection === 'wifi' && ['waiting', 'unknown', 'error'].includes(state.session?.status);
   $('#wifi-pair-button').disabled = $('#wifi-connect-button').disabled = busy || (Boolean(state.session) && !recoveringAndroid) || mode !== 'wifi';
   $('#wifi-refresh').disabled = busy;
-  $('#wifi-ios').hidden = $('#wifi-phone').value !== 'ios';
-  $('#wifi-android').hidden = $('#wifi-phone').value !== 'android';
+  const guide = $('#wifi-phone').value;
+  $('#wifi-ios').hidden = guide !== 'ios';
+  $('#remote-access').hidden = guide !== 'ios-remote';
+  $('#wifi-android').hidden = guide !== 'android';
+  const steps = {
+    'usb-iphone': Boolean(selectedUsbIphone) || Boolean(state.preferences.remoteUdid),
+    paired: Boolean(state.preferences.remoteUdid),
+    host: Boolean(state.preferences.remoteHost),
+  };
+  document.querySelectorAll('.setup-checklist [data-step]').forEach(item => item.classList.toggle('done', steps[item.dataset.step] === true));
 }
 async function switchToWifi() {
   const phone = handoffPhone();
@@ -560,9 +674,57 @@ $('#recenter-button').onclick = () => {
   else map.flyTo(selectedPlace ? [selectedPlace.latitude, selectedPlace.longitude] : [41.8827, -87.6233], selectedPlace ? Math.max(13, map.getZoom()) : 13, { duration: 0.6 });
 };
 $('#retry-map').onclick = () => { tileErrors = 0; $('#map-error').hidden = true; tiles.redraw(); };
+$('#offline-map-link').onclick = () => $('#settings-button').click();
+const chooseTiles = kind => async () => {
+  if (!api.chooseTileSource) { notify('Offline maps are available in the desktop app.', true); return; }
+  const info = await runOperation(() => api.chooseTileSource(kind));
+  if (info) { useTiles(info); notify(info.kind === 'online' ? 'Using the online map.' : `Offline map selected: ${info.name}.`); }
+};
+$('#tiles-online').onclick = chooseTiles('online');
+$('#tiles-mbtiles').onclick = chooseTiles('mbtiles');
+$('#tiles-folder').onclick = chooseTiles('folder');
+$('#route-speed').onchange = () => {
+  const value = Number($('#route-speed').value);
+  if (!Number.isFinite(value) || value < 1 || value > 120) { notify('Choose a route speed from 1 to 120 mph.', true); $('#route-speed').value = routeSpeed(); return; }
+  runOperation(() => api.updatePreferences({ routeSpeedMph: value }), `Route speed set to ${Math.round(value * 10) / 10} mph.`);
+};
+$('#routing-form').onsubmit = (event) => { event.preventDefault(); const url = $('#routing-url').value.trim(); try { new URL(url); } catch { notify('Enter a valid routing URL.', true); return; } runOperation(() => api.updatePreferences({ routingUrl: url }), 'Routing URL saved.'); };
+$('#reset-routing').onclick = () => { $('#routing-url').value = 'https://router.project-osrm.org/'; runOperation(() => api.updatePreferences({ routingUrl: 'https://router.project-osrm.org/' }), 'Default routing service restored.'); };
 $('#connection-badge').onclick = openSetup;
 $('#help-button').onclick = openSetup;
-$('#settings-button').onclick = () => { $('#provider-url').value = state.preferences.geocoderUrl || 'https://photon.komoot.io/api/'; renderRuntime(); paintIcons(); $('#settings-dialog').showModal(); };
+let phoneControlStatus = { enabled: false };
+function renderPhoneControl(status = phoneControlStatus) {
+  phoneControlStatus = status || { enabled: false };
+  const on = Boolean(phoneControlStatus.enabled);
+  $('#phone-control-toggle').checked = on || state.preferences.phoneControlEnabled === true;
+  $('#phone-control-toggle').disabled = isPreview || pending;
+  $('#phone-control-details').hidden = !on;
+  $('#phone-control-url').textContent = phoneControlStatus.url || '';
+  $('#phone-control-ip').textContent = phoneControlStatus.ipUrl && phoneControlStatus.ipUrl !== phoneControlStatus.url ? `If that name doesn’t open, use ${phoneControlStatus.ipUrl}` : '';
+  const pairing = phoneControlStatus.pairing;
+  const minutes = pairing ? Math.max(1, Math.ceil((pairing.expiresAt - Date.now()) / 60000)) : 0;
+  $('#phone-control-code').textContent = pairing ? `${pairing.code.slice(0, 3)} ${pairing.code.slice(3)} · expires in ${minutes} min` : '';
+  $('#phone-control-qr-box').hidden = !pairing;
+  if (pairing && $('#phone-control-qr').dataset.url !== pairing.url) {
+    const qr = qrcode(0, 'M'); qr.addData(pairing.url); qr.make();
+    $('#phone-control-qr').innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+    $('#phone-control-qr').dataset.url = pairing.url;
+  }
+  $('#phone-control-info').textContent = on ? `${phoneControlStatus.phones || 0} phone${phoneControlStatus.phones === 1 ? '' : 's'} paired. Commands from the phone work like the buttons here.` : '';
+  $('#phone-control-error').textContent = state.preferences.phoneControlEnabled && !on ? (phoneControlStatus.error || 'Phone control is waiting for Tailscale. Turn it off and on again once Tailscale is connected.') : '';
+}
+async function phoneControlAction(action, success) {
+  const status = await runOperation(() => api.phoneControl(action), success);
+  if (status) renderPhoneControl(status);
+  else if (api.phoneControl && !isPreview) renderPhoneControl(await api.phoneControl('status').catch(() => phoneControlStatus));
+}
+$('#phone-control-toggle').onchange = () => phoneControlAction($('#phone-control-toggle').checked ? 'enable' : 'disable', $('#phone-control-toggle').checked ? 'Phone control is on. Pair a phone next.' : 'Phone control is off.');
+$('#phone-control-pair').onclick = () => phoneControlAction('pair');
+$('#phone-control-revoke').onclick = () => phoneControlAction('revoke', 'All phones were signed out.');
+$('#phone-control-copy').onclick = () => { navigator.clipboard?.writeText(phoneControlStatus.url || '').then(() => notify('Address copied.'), () => {}); };
+if (api.onPhoneControl) api.onPhoneControl(status => { renderPhoneControl(status); notify('A phone was paired with Ghost.'); });
+$('#settings-button').onclick = () => {
+  if (api.phoneControl && !isPreview) api.phoneControl('status').then(renderPhoneControl, () => {}); $('#provider-url').value = state.preferences.geocoderUrl || 'https://photon.komoot.io/api/'; $('#routing-url').value = state.preferences.routingUrl || 'https://router.project-osrm.org/'; renderTileStatus(); renderRuntime(); paintIcons(); $('#settings-dialog').showModal(); };
 $('#scan-button').onclick = () => runOperation(() => api.scanDevices(), 'Device list refreshed.');
 $('#setup-scan').onclick = async () => { const result = await runOperation(() => api.scanDevices()); if (result && !result.devices.some((device) => device.platform === setupPlatform && device.state !== 'offline')) $('#setup-detection').textContent = `No ${platformName(setupPlatform)} found. Check the data cable, unlock the phone, and accept its prompt.`; };
 $('#change-configuration').onclick = openOnboarding;
@@ -584,7 +746,7 @@ $('#restore-button').onclick = () => runOperation(() => api.stopLocation(), 'Res
 $('#toast-close').onclick = () => { $('#toast').hidden = true; clearTimeout(toastTimer); };
 $('#install-runtime').onclick = () => runOperation(() => api.installRuntime(), 'Device tools checked.');
 $('#restore-preference').onchange = () => runOperation(() => api.updatePreferences({ restoreOnQuit: $('#restore-preference').checked }));
-$('#provider-form').onsubmit = (event) => { event.preventDefault(); const url = $('#provider-url').value.trim(); try { if (new URL(url).protocol !== 'https:') throw new Error(); } catch { notify('Use a valid HTTPS URL for your search provider.', true); return; } runOperation(() => api.updatePreferences({ geocoderUrl: url }), 'Search endpoint saved.'); };
+$('#provider-form').onsubmit = (event) => { event.preventDefault(); const url = $('#provider-url').value.trim(); try { if (!['https:', 'http:'].includes(new URL(url).protocol)) throw new Error(); } catch { notify('Use a valid HTTPS URL for your search provider (HTTP only on this computer or your network).', true); return; } runOperation(() => api.updatePreferences({ geocoderUrl: url }), 'Search endpoint saved.'); };
 $('#reset-provider').onclick = () => { $('#provider-url').value = 'https://photon.komoot.io/api/'; runOperation(() => api.updatePreferences({ geocoderUrl: 'https://photon.komoot.io/api/' }), 'Default search endpoint restored.'); };
 $('#save-form').onsubmit = async (event) => { event.preventDefault(); const label = $('#place-name').value.trim(); if (!label || !placeBeingSaved) return; const result = await runOperation(() => api.savePlace({ ...placeBeingSaved, label }), 'Place saved.'); if (result) $('#save-dialog').close(); };
 $('#coordinate-form').onsubmit = (event) => { event.preventDefault(); selectPlace({ latitude: $('#latitude').value, longitude: $('#longitude').value, label: 'Custom coordinates' }); };
@@ -607,7 +769,7 @@ document.querySelectorAll('dialog').forEach((dialog) => dialog.addEventListener(
 $('#onboarding-dialog').addEventListener('cancel', (event) => { if (state.preferences.onboardingComplete !== true) event.preventDefault(); });
 
 $('#connection-options').onclick = () => {
-  $('#wifi-phone').value = setupPlatform || 'ios';
+  $('#wifi-phone').value = (state.preferences.connection === 'remote' || (state.preferences.remoteUdid && !state.preferences.remoteHost)) ? 'ios-remote' : (setupPlatform || 'ios');
   $('#wifi-manual').open = !handoffPhone();
   renderConnections();
   $('#wifi-dialog').showModal();
@@ -619,7 +781,27 @@ $('#wifi-dialog').addEventListener('close', () => { $('#wifi-pair-code').value =
 document.querySelectorAll('[data-connection]').forEach(button => {
   button.onclick = () => button.dataset.connection === 'wifi' && handoffPhone() ? switchToWifi() : runOperation(() => api.setConnection(button.dataset.connection));
 });
-$('#enable-iphone-wifi').onclick = () => runOperation(() => api.connectWifi({platform: 'ios', deviceId: selectedDeviceId}), 'Wi-Fi enabled. Choose Wi-Fi above to find your iPhone.');
+$('#pair-remote').onclick = () => runOperation(() => api.pairRemote(selectedDeviceId), 'Remote access is set up. Next, enter the iPhone’s Tailscale address.');
+$('#find-tailscale').onclick = async () => {
+  const results = $('#tailscale-results');
+  const phones = await runOperation(() => api.findTailscalePhones());
+  if (!phones) return;
+  results.hidden = false;
+  results.innerHTML = phones.length
+    ? phones.map((phone, index) => `<button type="button" class="tailscale-result" data-tailscale="${index}"><span class="status-dot ${phone.online ? 'online' : ''}"></span><span><strong>${esc(phone.name)}</strong><small>${esc(phone.ip)} · ${phone.online ? 'online' : 'offline'}</small></span><span>Use</span></button>`).join('')
+    : '<p class="settings-note">No iPhone or iPad found on your tailnet. Open Tailscale on the iPhone and sign in to the same account.</p>';
+  results.querySelectorAll('[data-tailscale]').forEach(button => {
+    button.onclick = async () => {
+      const phone = phones[Number(button.dataset.tailscale)];
+      $('#remote-host').value = phone.ip;
+      const saved = await runOperation(() => api.updatePreferences({ remoteHost: phone.ip }), `Using ${phone.name} at ${phone.ip}.`);
+      if (saved) results.hidden = true;
+    };
+  });
+};
+$('#remote-host-form').onsubmit = (event) => { event.preventDefault(); runOperation(() => api.updatePreferences({ remoteHost: $('#remote-host').value.trim() }), 'Tailscale address saved.'); };
+$('#clear-remote-host').onclick = () => runOperation(() => api.updatePreferences({ remoteHost: null }), 'Tailscale address cleared.');
+$('#enable-iphone-wifi').onclick = () => runOperation(() => api.connectWifi({platform: 'ios', deviceId: selectedDeviceId}), 'Wireless access is set up. Join the same Wi-Fi, then choose Wi-Fi above.');
 $('#wifi-pair-form').onsubmit = async event => {
   event.preventDefault();
   const code = $('#wifi-pair-code').value;
@@ -665,6 +847,10 @@ api.onState(acceptState);
 render();
 api.getState().then(async next => {
   acceptState(next);
+  if (api.getTileInfo) {
+    const info = await api.getTileInfo().catch(() => null);
+    if (info) { useTiles(info); if (info.error) notify(`Offline map unavailable: ${info.error} Using the online map.`, true); }
+  }
   if (api.getRoute) {
     const planned = await api.getRoute();
     if (planned) { routePlan = planned; routeStops = planned.waypoints; drawRoute(); renderRoute(); paintIcons(); }

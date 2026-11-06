@@ -13,6 +13,15 @@ contextBridge.exposeInMainWorld('ghost', Object.freeze({
   connectWifi: value => invoke('connectWifi', value),
   scanDevices: () => invoke('scanDevices'),
   prepareDevice: id => invoke('prepareDevice', id),
+  pairRemote: id => invoke('pairRemote', id),
+  findTailscalePhones: () => invoke('findTailscalePhones'),
+  phoneControl: action => invoke('phoneControl', action),
+  onPhoneControl: callback => {
+    if (typeof callback !== 'function') throw new Error('A callback is required.');
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on('ghost:phone-control', listener);
+    return () => ipcRenderer.removeListener('ghost:phone-control', listener);
+  },
   applyLocation: point => invoke('applyLocation', point),
   stopLocation: () => invoke('stopLocation'),
   getRoute: () => invoke('getRoute'),
@@ -24,6 +33,8 @@ contextBridge.exposeInMainWorld('ghost', Object.freeze({
   savePlace: place => invoke('savePlace', place),
   deletePlace: id => invoke('deletePlace', id),
   updatePreferences: value => invoke('updatePreferences', value),
+  getTileInfo: () => invoke('getTileInfo'),
+  chooseTileSource: kind => invoke('chooseTileSource', kind),
   installRuntime: () => invoke('installRuntime'),
   onState: callback => {
     if (typeof callback !== 'function') throw new Error('A callback is required.');

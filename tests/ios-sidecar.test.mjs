@@ -13,3 +13,15 @@ test('Python iOS bridge USB selection, acknowledgement, failure and cleanup', { 
   });
   assert.equal(result.status, 0, result.stderr || result.error?.message);
 });
+test('Python persistence probe helper validates input and never claims an acknowledgement', { skip: !existsSync(python) }, () => {
+  const result = spawnSync(python, ['-m', 'unittest', 'test_probe.py'], {
+    cwd: path.join(root, 'sidecar'), encoding: 'utf8', timeout: 30000,
+  });
+  assert.equal(result.status, 0, result.stderr || result.error?.message);
+});
+test('Python network transport uses RemotePairing with exact identity and never falls back to USB', { skip: !existsSync(python) }, () => {
+  const result = spawnSync(python, ['-m', 'unittest', 'test_remote_pairing.py'], {
+    cwd: path.join(root, 'sidecar'), encoding: 'utf8', timeout: 30000,
+  });
+  assert.equal(result.status, 0, result.stderr || result.error?.message);
+});

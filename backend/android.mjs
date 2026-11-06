@@ -96,7 +96,7 @@ export class AndroidAdapter {
   async transports() {
     const {stdout} = await this.command(['devices', '-l']);
     const devices = [];
-    for (const entry of parseDevices(stdout, this.connection)) {
+    for (const entry of (this.connection === 'remote' ? [] : parseDevices(stdout, this.connection))) {
       if (this.connection === 'wifi') {
         if (entry.adbState === 'device') {
           try {

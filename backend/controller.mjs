@@ -1,14 +1,20 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { place, text, geocoderUrl } from './validation.mjs';
-import { Router, measurePath, pointAlong, ROUTE_SPEED_MPS } from './routing.mjs';
+import { place, text, geocoderUrl, routingUrl, speedMph, remoteHost, DEFAULT_SPEED_MPH } from './validation.mjs';
+import { Router, measurePath, pointAlong, speedMps } from './routing.mjs';
+import { findTailscaleApplePeers } from './tailscale.mjs';
 
 const REPLACEABLE_SESSION_STATUSES = new Set(['unknown', 'waiting', 'error']);
 const USABLE_REPLACEMENT_STATES = new Set(['ready', 'setup-required']);
+const ROUTE_CHECKPOINT_MS = 5000;
+const CONNECTIONS = ['usb', 'wifi', 'remote'];
+const runningMessage = route => `Following the road at ${route.speedMph} mph. Sending a location every second.`;
 
 export class Controller extends EventEmitter {
-  constructor({ adapters, store, now = Date.now, router = new Router(), clock = () => performance.now(), network = async () => ({wifi: false}) }) {
+  constructor({ adapters, store, now = Date.now, router = new Router(), clock = () => performance.now(), network = async () => ({wifi: false}), routeJournal = null, tailscale = findTailscaleApplePeers }) {
     super(); this.adapters = adapters; this.store = store;
+    this.routeJournal = routeJournal; this.routeCheckpointAt = -Infinity;
+    this.tailscale = tailscale;
     this.state = { devices: [], runtime: {}, session: null, savedPlaces: [], recentPlaces: [], preferences: {}, busy: false, warning: null };
     this.scanning = null;
     this.now = now; this.network = network; this.networkCheckedAt = -Infinity;
@@ -26,7 +32,9 @@ export class Controller extends EventEmitter {
   async init() {
     const saved = await this.store.load();
     Object.assign(this.state, saved, { warning: this.store.warning });
-    for (const adapter of Object.values(this.adapters)) adapter.connection = this.state.preferences.connection === 'wifi' ? 'wifi' : 'usb';
+    if (!CONNECTIONS.includes(this.state.preferences.connection)) this.state.preferences.connection = 'usb';
+    for (const adapter of Object.values(this.adapters)) adapter.connection = this.state.preferences.connection;
+    this.applyRemote();
     if (this.state.session) {
       this.state.session.status = 'unknown';
       this.state.session.id ||= randomUUID();
@@ -34,7 +42,64 @@ export class Controller extends EventEmitter {
       this.state.session.message = 'Previous session found. Connect this phone, then choose Retry location or Restore.';
       await this.persist();
     }
+    await this.restoreRoute();
     return this.scanDevices();
+  }
+  applyRemote() {
+    const { remoteHost: host = null, remoteUdid: udid = null } = this.state.preferences;
+    if (this.adapters.ios) this.adapters.ios.remote = { host, udid };
+  }
+  /** iPhones/iPads on this computer's tailnet, read from the local Tailscale CLI (read-only). */
+  async findTailscalePhones() { return this.tailscale(); }
+  /** One-time USB setup for Wi-Fi and remote (Tailscale) iPhone connections. */
+  async pairRemote(id) {
+    return this.exclusive(async () => {
+      const device = this.device(id);
+      if (device.platform !== 'ios' || device.connection !== 'usb') throw new Error('Connect the iPhone by USB to set up remote access.');
+      await this.adapters.ios.pairRemote(device);
+      const previous = this.state.preferences.remoteUdid;
+      this.state.preferences.remoteUdid = device.serial;
+      try { await this.persist(); } catch (error) { this.state.preferences.remoteUdid = previous; throw error; }
+      this.applyRemote();
+    });
+  }
+  routeSpeed() { return this.state.preferences.routeSpeedMph ?? DEFAULT_SPEED_MPH; }
+  /** Bring back a saved route after a restart, always paused; Resume is manual. */
+  async restoreRoute() {
+    if (!this.routeJournal) return;
+    let saved;
+    try { saved = await this.routeJournal.load(); }
+    catch (error) { this.state.warning = `The saved route could not be read and was ignored: ${error.message}`; await this.routeJournal.clear().catch(() => {}); return; }
+    if (!saved) return;
+    const session = this.state.session;
+    this.plannedRoute = saved.route; this.routePath = saved.path;
+    if (!session || session.deviceId !== saved.progress.deviceId) {
+      // No unresolved simulation on that phone: keep the geometry as a plan only.
+      await this.routeJournal.clear().catch(() => {});
+      return;
+    }
+    const { traveledMeters, speedMph: mph } = saved.progress;
+    const completed = saved.progress.status === 'completed';
+    this.state.route = { id: saved.route.id, deviceId: session.deviceId, status: completed ? 'completed' : 'paused', restored: true,
+      speedMph: mph, distanceMeters: saved.path.distanceMeters, traveledMeters,
+      remainingSeconds: (saved.path.distanceMeters - traveledMeters) / speedMps(mph), point: pointAlong(saved.path, traveledMeters),
+      message: completed ? 'Saved route had arrived. Restore real location when you are done.' : 'Saved route found. Connect this phone, then press Resume route, or Restore.' };
+  }
+  /** Durable route progress. Best effort: it never blocks or fails phone commands. */
+  async checkpointRoute(force = false) {
+    const route = this.state.route;
+    if (!this.routeJournal || !route || !this.plannedRoute || this.plannedRoute.id !== route.id) return;
+    if (!force && this.now() - this.routeCheckpointAt < ROUTE_CHECKPOINT_MS) return;
+    this.routeCheckpointAt = this.now();
+    try {
+      if (!force && this.state.session) await this.persist(); // keep the session point in step with progress
+      await this.routeJournal.save(this.plannedRoute, { deviceId: route.deviceId, status: route.status,
+        traveledMeters: route.traveledMeters, speedMph: route.speedMph, savedAt: new Date(this.now()).toISOString() });
+    } catch (error) { this.state.warning = `Route progress could not be saved: ${error.message}`; }
+  }
+  async forgetRoute() {
+    if (!this.routeJournal) return;
+    try { await this.routeJournal.clear(); } catch (error) { this.state.warning = `The saved route file could not be removed: ${error.message}`; }
   }
   snapshot() { return structuredClone(this.state); }
   notify() { this.emit('state', this.snapshot()); }
@@ -109,7 +174,7 @@ export class Controller extends EventEmitter {
     const previous = this.state.session;
     if (!previous || !REPLACEABLE_SESSION_STATUSES.has(previous.status)) return false;
     const replacement = this.state.devices.find(device => device.id !== previous.deviceId &&
-      (previous.platform === 'ios' || (previous.connection || 'usb') === 'usb' || previous.hardwareId) && ['usb', 'wifi'].includes(device.connection) && USABLE_REPLACEMENT_STATES.has(device.state));
+      (previous.platform === 'ios' || (previous.connection || 'usb') === 'usb' || previous.hardwareId) && CONNECTIONS.includes(device.connection) && USABLE_REPLACEMENT_STATES.has(device.state));
     if (!replacement) return false;
 
     // A recovery record from another phone must not lock the newly connected
@@ -134,7 +199,7 @@ export class Controller extends EventEmitter {
     }
 
     this.deviceMisses.delete(previous.deviceId);
-    this.pauseRouteMotion(); this.state.route = null;
+    this.pauseRouteMotion(); this.state.route = null; await this.forgetRoute();
     const oldId = typeof previous.deviceId === 'string' ? previous.deviceId : null;
     const oldSerial = typeof previous.serial === 'string' ? previous.serial : oldId?.replace(/^[^:]+:/, '');
     if (oldId && oldSerial && typeof previous.platform === 'string') {
@@ -163,14 +228,32 @@ export class Controller extends EventEmitter {
     return device;
   }
   async setConnection(connection) {
-    if (!['usb', 'wifi'].includes(connection)) throw new Error('Choose USB or Wi-Fi.');
+    if (!CONNECTIONS.includes(connection)) throw new Error('Choose USB, Wi-Fi or remote.');
+    if (connection === 'remote' && (!this.state.preferences.remoteHost || !this.state.preferences.remoteUdid)) {
+      throw new Error('Set up remote access over USB and enter the iPhone’s remote address first.');
+    }
     if (connection === (this.state.preferences.connection || 'usb')) return this.snapshot();
     if (connection === 'wifi' && this.state.session?.status === 'active' && (this.state.session.connection || 'usb') === 'usb') return this.switchToWifi(this.state.session.deviceId);
     return this.exclusive(async () => {
-      if (this.state.session) throw new Error('Restore the current location before changing connections.');
+      const session = this.state.session;
+      // An unresolved record may move to another connection so the SAME phone can be
+      // restored or retried there (e.g. away from the cable). A live session may not.
+      const unresolved = session && REPLACEABLE_SESSION_STATUSES.has(session.status);
+      const samePhone = connection !== 'remote' || session?.deviceId === `ios:${this.state.preferences.remoteUdid}`;
+      if (session && !(unresolved && samePhone)) throw new Error('Restore the current location before changing connections.');
       const previous = this.state.preferences.connection;
+      const previousSession = session && { autoReconnect: session.autoReconnect, message: session.message };
       this.state.preferences.connection = connection;
-      try { await this.persist(); } catch (error) { this.state.preferences.connection = previous; throw error; }
+      if (session) {
+        this.resumeSessionId = null; // never re-apply automatically after a transport change
+        session.autoReconnect = false;
+        session.message = `Switched to ${connection === 'remote' ? 'Remote' : connection === 'wifi' ? 'Wi-Fi' : 'USB'}. When this phone appears, choose Retry location or Restore.`;
+      }
+      try { await this.persist(); } catch (error) {
+        this.state.preferences.connection = previous;
+        if (session) Object.assign(session, previousSession);
+        throw error;
+      }
       for (const adapter of Object.values(this.adapters)) adapter.connection = connection;
       this.state.devices = [];
       await this.scan();
@@ -186,7 +269,7 @@ export class Controller extends EventEmitter {
       const resumeMotion = () => {
         if (wasRunning && this.state.route?.status === 'paused' && this.state.session?.status === 'active' && !this.closing && !this.suspended) {
           this.state.route.status = 'running';
-          this.state.route.message = 'Following the road at 45 mph. Sending a location every second.';
+          this.state.route.message = runningMessage(this.state.route);
           this.routeStepAt = this.clock(); this.scheduleRouteTick();
         }
       };
@@ -256,6 +339,10 @@ export class Controller extends EventEmitter {
         const device = this.device(input.deviceId);
         if (device.platform !== 'ios' || device.connection !== 'usb') throw new Error('Connect and select the iPhone by USB first.');
         await this.adapters.ios.enableWifi(device);
+        // iOS 27 Wi-Fi tunnels use RemotePairing; create this computer's record while on USB.
+        await this.adapters.ios.pairRemote(device);
+        this.state.preferences.remoteUdid = device.serial; this.applyRemote();
+        await this.persist();
       } else if (input?.platform === 'android') {
         await this.adapters.android.connectWifi(input);
       } else throw new Error('Choose iPhone or Android.');
@@ -292,7 +379,9 @@ export class Controller extends EventEmitter {
       // Journal before device mutation, so a crash cannot discard an unresolved session.
       try { await this.persist(); }
       catch (error) { this.state.session = previous; throw error; }
-      this.state.route = route ? { id: route.id, deviceId: device.id, status: 'starting', speedMph: 45, distanceMeters: route.distanceMeters, traveledMeters: 0, remainingSeconds: route.durationSeconds, point, message: 'Sending the route start to your phone…' } : null;
+      const mph = this.routeSpeed();
+      this.state.route = route ? { id: route.id, deviceId: device.id, status: 'starting', speedMph: mph, distanceMeters: route.distanceMeters, traveledMeters: 0, remainingSeconds: route.distanceMeters / speedMps(mph), point, message: 'Sending the route start to your phone…' } : null;
+      if (!route) await this.forgetRoute();
       this.notify();
       this.resumeSessionId = wasLive ? current.id : null;
       this.retryAt = 0; this.retryAttempts = 0;
@@ -337,7 +426,7 @@ export class Controller extends EventEmitter {
       try {
         if (recovering) await this.adapters[device.platform].reset?.(device);
         await this.adapters[device.platform].clear(device);
-        this.state.session = null; await this.persist(); this.state.route = null; return this.snapshot();
+        this.state.session = null; await this.persist(); this.state.route = null; await this.forgetRoute(); return this.snapshot();
       } catch (error) {
         this.state.session = session;
         session.status = 'unknown'; session.message = `Restoration could not be confirmed: ${error.message}`;
@@ -356,6 +445,7 @@ export class Controller extends EventEmitter {
     if (current.autoReconnect) current.message += ' Ghost will reconnect this phone and resume the selected location.';
     this.retryAt = 0;
     try { await this.persist(); } catch { this.state.warning = 'Could not save session recovery state.'; }
+    await this.checkpointRoute(true);
     this.notify();
   }
   canResume(session = this.state.session) {
@@ -433,7 +523,8 @@ export class Controller extends EventEmitter {
   getRoute() { return this.plannedRoute ? structuredClone(this.plannedRoute) : null; }
   async planRoute(waypoints) {
     if (this.state.busy || (this.state.route && this.state.session)) throw new Error('Finish the current operation and restore real location before changing the route.');
-    const route = await this.router.plan(waypoints);
+    this.router.configure?.(this.state.preferences.routingUrl);
+    const route = await this.router.plan(waypoints, { speedMph: this.routeSpeed() });
     if (this.state.busy || (this.state.route && this.state.session)) throw new Error('Finish the current operation and restore real location before changing the route.');
     this.plannedRoute = route;
     this.routePath = measurePath(route.coordinates);
@@ -446,8 +537,9 @@ export class Controller extends EventEmitter {
     await this.applyLocation({ deviceId, ...pointAlong(this.routePath, 0), label: `Route to ${route.waypoints.at(-1).label}` }, route);
     if (this.closing || this.suspended || this.state.session?.status !== 'active' || this.state.route?.status !== 'starting') return this.snapshot();
     this.state.route.status = 'running';
-    this.state.route.message = 'Following the road at 45 mph. Sending a location every second.';
+    this.state.route.message = runningMessage(this.state.route);
     this.routeStepAt = this.clock();
+    await this.checkpointRoute(true);
     this.scheduleRouteTick(); this.notify(); return this.snapshot();
   }
   pauseRouteMotion(message = 'Paused. Your phone holds the last route location.') {
@@ -459,12 +551,12 @@ export class Controller extends EventEmitter {
   async pauseRoute() {
     this.pauseRouteMotion(); this.notify();
     if (this.routeUpdate) await this.routeUpdate;
-    await this.persist(); this.notify(); return this.snapshot();
+    await this.persist(); await this.checkpointRoute(true); this.notify(); return this.snapshot();
   }
   async resumeRoute() {
     return this.exclusive(async () => {
       const route = this.state.route, current = this.state.session;
-      if (!route || route.status !== 'paused') throw new Error('There is no paused route to resume.');
+      if (!route || route.status !== 'paused' || !this.routePath || this.plannedRoute?.id !== route.id) throw new Error('There is no paused route to resume.');
       if (this.closing || this.suspended || !current || current.deviceId !== route.deviceId) throw new Error('Reconnect the original phone before resuming.');
       const device = this.device(current.deviceId);
       if (current.status !== 'active') {
@@ -479,7 +571,7 @@ export class Controller extends EventEmitter {
           await this.sessionEnded({ deviceId: current.deviceId, sessionId: current.id, error: error.message }); throw error;
         }
       }
-      route.status = 'running'; route.message = 'Following the road at 45 mph. Sending a location every second.';
+      route.status = 'running'; route.message = runningMessage(route); route.restored = false;
       this.routeStepAt = this.clock(); this.scheduleRouteTick();
     });
   }
@@ -505,12 +597,13 @@ export class Controller extends EventEmitter {
     const operation = async () => {
       try {
         const device = this.device(current.deviceId);
-        const distance = Math.min(route.distanceMeters, route.traveledMeters + ROUTE_SPEED_MPS * elapsed / 1000);
+        const speed = speedMps(route.speedMph ?? DEFAULT_SPEED_MPH);
+        const distance = Math.min(route.distanceMeters, route.traveledMeters + speed * elapsed / 1000);
         const point = pointAlong(this.routePath, distance);
         // Record the attempted point before sending. Recovery holds this point;
         // it never advances the route while transport state is uncertain.
         Object.assign(current, point);
-        Object.assign(route, { point, traveledMeters: distance, remainingSeconds: (route.distanceMeters - distance) / ROUTE_SPEED_MPS });
+        Object.assign(route, { point, traveledMeters: distance, remainingSeconds: (route.distanceMeters - distance) / speed });
         const adapter = this.adapters[device.platform];
         const result = await (adapter.update ? adapter.update(device, { ...point, sessionId: current.id }) : adapter.set(device, { ...point, sessionId: current.id }));
         if (this.state.session !== current || current.status !== 'active' || this.closing) return;
@@ -519,11 +612,11 @@ export class Controller extends EventEmitter {
         current.refreshIntervalMs = 1000; current.refreshSource = 'command-ack';
         if (distance >= route.distanceMeters) {
           route.status = 'completed'; route.message = 'Arrived. Your phone holds the destination until you restore real location.';
-          await this.persist();
+          await this.persist(); await this.checkpointRoute(true);
         } else if (this.clock() - started >= 1000) {
           this.pauseRouteMotion('Location updates are taking longer than a second. Check the connection, then resume.');
-          await this.persist();
-        }
+          await this.persist(); await this.checkpointRoute(true);
+        } else await this.checkpointRoute();
         this.notify();
       } catch (error) {
         await this.sessionEnded({ deviceId: current.deviceId, sessionId: current.id, error: `Route paused: ${error.message}` });
@@ -545,8 +638,45 @@ export class Controller extends EventEmitter {
     this.state.savedPlaces = this.state.savedPlaces.filter(p => p.id !== id);
     await this.persist(); this.notify(); return this.snapshot();
   }
+  async setRouteSpeed(value) {
+    const mph = speedMph(value);
+    this.state.preferences.routeSpeedMph = mph;
+    const route = this.state.route;
+    if (route && route.status !== 'completed') {
+      route.speedMph = mph;
+      route.remainingSeconds = (route.distanceMeters - route.traveledMeters) / speedMps(mph);
+      if (route.status === 'running') route.message = runningMessage(route);
+    }
+    if (this.plannedRoute) { this.plannedRoute.speedMph = mph; this.plannedRoute.durationSeconds = this.plannedRoute.distanceMeters / speedMps(mph); }
+    await this.persist(); await this.checkpointRoute(true); this.notify(); return this.snapshot();
+  }
   async updatePreferences(input) {
     if (!input || typeof input !== 'object') throw new Error('Invalid preferences.');
+    if (input.routeSpeedMph != null) speedMph(input.routeSpeedMph); // validate before changing anything
+    if (input.routingUrl != null) this.state.preferences.routingUrl = routingUrl(text(input.routingUrl));
+    if (input.phoneControlEnabled != null) {
+      if (typeof input.phoneControlEnabled !== 'boolean') throw new Error('Invalid phone control preference.');
+      this.state.preferences.phoneControlEnabled = input.phoneControlEnabled;
+    }
+    if (input.remoteHost !== undefined) {
+      if (input.remoteHost === null || input.remoteHost === '') {
+        if (this.state.preferences.connection === 'remote' && this.state.session) throw new Error('Restore the current location before clearing the remote address.');
+        this.state.preferences.remoteHost = null;
+      } else {
+        const host = remoteHost(input.remoteHost);
+        if (this.state.preferences.connection === 'remote' && this.state.session && host !== this.state.preferences.remoteHost) {
+          throw new Error('Restore the current location before changing the remote address.');
+        }
+        this.state.preferences.remoteHost = host;
+      }
+      this.applyRemote();
+    }
+    if (input.tileSource != null) {
+      if (!['online', 'mbtiles', 'folder'].includes(input.tileSource)) throw new Error('Invalid map tile source.');
+      if (input.tileSource !== 'online' && (typeof input.tilePath !== 'string' || !input.tilePath || input.tilePath.length > 1024)) throw new Error('Choose an offline tile file or folder.');
+      this.state.preferences.tileSource = input.tileSource;
+      this.state.preferences.tilePath = input.tileSource === 'online' ? null : input.tilePath;
+    }
     if (input.restoreOnQuit != null) {
       if (typeof input.restoreOnQuit !== 'boolean') throw new Error('Invalid quit preference.');
       this.state.preferences.restoreOnQuit = input.restoreOnQuit;
@@ -564,6 +694,7 @@ export class Controller extends EventEmitter {
       if (!['ios', 'android'].includes(input.phonePlatform)) throw new Error('Invalid phone platform.');
       this.state.preferences.phonePlatform = input.phonePlatform;
     }
+    if (input.routeSpeedMph != null) return this.setRouteSpeed(input.routeSpeedMph);
     await this.persist(); this.notify(); return this.snapshot();
   }
   async dispose(options) {

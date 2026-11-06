@@ -4,18 +4,20 @@ No request is acknowledged until the awaited upstream operation completes.
 The DVT set selector expects a device reply; clear is an upstream no-reply selector.
 """
 import asyncio
-from contextlib import AsyncExitStack, aclosing, suppress
+from contextlib import AsyncExitStack, suppress
 from contextvars import ContextVar
 from datetime import datetime, timezone
 import importlib.metadata
 import json
 import logging
+import ipaddress
 import math
+import os
 import re
 import sys
 
 PROTOCOL_VERSION = 1
-PINNED_VERSION = "11.12.4"
+PINNED_VERSION = "11.50.0"
 REFRESH_INTERVAL = 1.0
 LOCATION_ACK_TIMEOUT = 5.0
 PROTOCOL_OUT = sys.stdout
@@ -26,9 +28,11 @@ logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
 from packaging.version import Version
 from pymobiledevice3 import usbmux
 from pymobiledevice3.exceptions import AlreadyMountedError
-from pymobiledevice3.lockdown import create_using_usbmux, get_mobdev2_lockdowns
+from pymobiledevice3.lockdown import create_using_usbmux
 from pymobiledevice3.remote import userspace_tunnel
-from pymobiledevice3.remote.tunnel_service import CoreDeviceTunnelProxy
+from pymobiledevice3.exceptions import RemotePairingCompletedError
+from pymobiledevice3.remote.tunnel_service import (CoreDeviceTunnelProxy, RemotePairingLockdownService,
+                                                   RemotePairingTunnelService, get_remote_pairing_tunnel_services)
 from pymobiledevice3.services.dvt.instruments.dvt_provider import DvtProvider
 from pymobiledevice3.services.dvt.instruments.location_simulation import LocationSimulation
 from pymobiledevice3.services.mobile_image_mounter import PersonalizedImageMounter, fetch_personalized_ddi
@@ -62,23 +66,86 @@ async def usb_lockdown(udid, autopair=False):
 CONNECTION = ContextVar("ghost_connection", default="usb")
 
 
+UDID_PATTERN = re.compile(r"[A-Za-z0-9-]{8,80}")
+REMOTE_PAIRING_PORT = 49152
+NETWORK_CONNECTIONS = ("wifi", "remote")
+NETWORK_TIMEOUT = 15.0
+# Explicit host for the "remote" connection (for example a Tailscale 100.x address).
+REMOTE_HOST = ContextVar("ghost_remote_host", default=None)
+
+
+def wifi_debug(*parts):
+    # Opt-in diagnostics on stderr only (never the protocol stream); no secrets are printed.
+    if os.environ.get("GHOST_DEBUG_WIFI"):
+        print("network:", *parts, file=sys.stderr, flush=True)
+
+
+def valid_remote_host(value):
+    """An IP literal only: no hostnames (DNS could redirect) and no ports or paths."""
+    if not isinstance(value, str) or len(value) > 64:
+        return None
+    try:
+        return str(ipaddress.ip_address(value.strip()))
+    except ValueError:
+        return None
+
+
+async def remote_pairing_services(udid=None, bonjour_timeout=4.0):
+    """Paired iPhones reachable over the network through RemotePairing (iOS 17.4+).
+
+    Identity: the phone must complete pair-verify against this host's RemotePairing record
+    (created once over USB with `pair-remote`). Bonjour answers are matched to records by
+    authTag, never by Wi-Fi MAC, so a Private Wi-Fi Address does not matter. iOS only offers
+    these services while the phone is joined to some Wi-Fi network; on cellular alone they are
+    switched off (hardware-verified on iOS 27.0.1).
+    """
+    if CONNECTION.get() == "remote":
+        host = REMOTE_HOST.get()
+        if host is None or udid is None:
+            raise ValueError("Enter the iPhone's remote address (for example its Tailscale 100.x IP).")
+        service = RemotePairingTunnelService(udid, host, REMOTE_PAIRING_PORT)
+        try:
+            await asyncio.wait_for(service.connect(autopair=False), NETWORK_TIMEOUT)
+        except BaseException as error:
+            with suppress(BaseException):
+                await service.close()
+            if isinstance(error, (KeyboardInterrupt, SystemExit, asyncio.CancelledError)):
+                raise
+            wifi_debug("remote connect failed", type(error).__name__)
+            raise ConnectionError(
+                "The iPhone did not answer at that address. Keep it on Wi-Fi with Tailscale on, "
+                "and set up remote access over USB first.") from error
+        return [service]
+    services = await get_remote_pairing_tunnel_services(udid=udid, bonjour_timeout=bonjour_timeout)
+    wifi_debug("remotepairing services", len(services))
+    return services
+
+
+async def remote_pairing_service(udid):
+    services = await remote_pairing_services(udid=udid)
+    for extra in services[1:]:
+        with suppress(BaseException):
+            await extra.close()
+    if not services:
+        raise ConnectionError("This iPhone was not found on Wi-Fi. Unlock it, join the same network, "
+                              "and set up remote access over USB first.")
+    return services[0]
+
+
 async def connection_lockdown(udid, autopair=False):
-    if CONNECTION.get() == "usb":
-        return await usb_lockdown(udid, autopair=autopair)
-    if not isinstance(udid, str) or not re.fullmatch(r"[A-Za-z0-9-]{8,80}", udid):
-        raise ValueError("A specific iPhone identifier is required.")
-    async with asyncio.timeout(8):
-        async with aclosing(get_mobdev2_lockdowns(only_paired=True, timeout=2)) as devices:
-            async for _address, lockdown in devices:
-                # Bonjour names and pairing records alone do not establish identity.
-                if lockdown.udid == udid and lockdown.paired:
-                    return lockdown
-                await lockdown.close()
-    raise ConnectionError("This trusted iPhone was not found on Wi-Fi. Unlock it, use the same network and enable Wi-Fi over USB first.")
+    if CONNECTION.get() != "usb":
+        raise RuntimeError("This operation needs the iPhone connected by USB.")
+    return await usb_lockdown(udid, autopair=autopair)
 
 
 async def strict_usb_provider(serial, autopair, remotepairing_fallback=False):
-    """Use only the requested transport; retain the pinned rootless tunnel lifecycle."""
+    """Use only the requested transport; retain the pinned rootless tunnel lifecycle.
+
+    USB: CoreDeviceProxy over the exact USB lockdown. Network (Wi-Fi or remote): RemotePairing.
+    On iOS 27 the phone refuses CoreDeviceProxy tunnel establishment over a network lockdown.
+    """
+    if CONNECTION.get() in NETWORK_CONNECTIONS:
+        return await remote_pairing_service(serial), None
     lockdown = await connection_lockdown(serial, autopair=False)
     try:
         if not lockdown.paired:
@@ -116,21 +183,36 @@ class Bridge:
             item.update(state="ready", detail=f"{'Wi-Fi' if connection == 'wifi' else 'USB'} connected. Developer Mode enabled.")
         return item
 
-    async def discover(self):
+    def describe_remote(self, service, connection):
+        info = (service.handshake_info or {}).get("peerDeviceInfo") or {}
+        udid = service.remote_identifier
+        detail = "Connected remotely through Tailscale." if connection == "remote" else "Connected over Wi-Fi."
+        return {"id": f"ios:{udid}", "serial": udid, "platform": "ios",
+                "name": str(info.get("name") or "iPhone")[:80], "osVersion": "",
+                "connection": connection, "state": "ready",
+                "detail": detail}
+
+    async def discover(self, udid=None):
         result = []
-        if CONNECTION.get() == "wifi":
-            seen = set()
-            # Bound Bonjour discovery so an unreachable paired phone cannot hang a scan.
+        connection = CONNECTION.get()
+        if connection in NETWORK_CONNECTIONS:
+            if connection == "remote" and not (udid and UDID_PATTERN.fullmatch(udid)):
+                return result
+            services = []
             try:
-                async with asyncio.timeout(8):
-                    async with aclosing(get_mobdev2_lockdowns(only_paired=True, timeout=2)) as devices:
-                        async for _address, lockdown in devices:
-                            async with lockdown:
-                                if lockdown.udid not in seen and lockdown.paired:
-                                    result.append(await self.describe(lockdown, "wifi"))
-                                    seen.add(lockdown.udid)
-            except TimeoutError:
-                pass
+                async with asyncio.timeout(NETWORK_TIMEOUT + 5):
+                    services = await remote_pairing_services(udid=udid, bonjour_timeout=3.0)
+            except (TimeoutError, ConnectionError, OSError) as error:
+                wifi_debug("discover", type(error).__name__)
+            seen = set()
+            for service in services:
+                try:
+                    if UDID_PATTERN.fullmatch(service.remote_identifier or "") and service.remote_identifier not in seen:
+                        seen.add(service.remote_identifier)
+                        result.append(self.describe_remote(service, connection))
+                finally:
+                    with suppress(BaseException):
+                        await service.close()
             return result
         for device in await usbmux.list_devices():
             if device.connection_type != "USB":
@@ -155,7 +237,29 @@ class Bridge:
             await lockdown.set_enable_wifi_connections(True)
         return {"enabled": True, "message": "Wi-Fi enabled. Keep both devices on the same network, then choose Wi-Fi in Ghost."}
 
+    async def pair_remote(self, udid):
+        """Create this host's RemotePairing record over the trusted USB lockdown (no prompt)."""
+        if CONNECTION.get() != "usb":
+            raise RuntimeError("Connect the iPhone by USB to set up remote access.")
+        async with await usb_lockdown(udid) as lockdown:
+            if not lockdown.paired:
+                raise RuntimeError("Unlock the iPhone and trust this computer first.")
+            service = await RemotePairingLockdownService.create(lockdown)
+            try:
+                await service.connect(autopair=True)
+            except RemotePairingCompletedError:
+                pass  # The phone closes the channel once pair-setup completes.
+            finally:
+                with suppress(BaseException):
+                    await service.close()
+        return {"paired": True, "message": "Remote access is set up. It appears on the iPhone under Settings → Developer → Paired Computers."}
+
     async def prepare(self, udid):
+        if CONNECTION.get() in NETWORK_CONNECTIONS:
+            # Hardware-verified on iOS 27: the developer image cannot be checked or mounted over
+            # the network. The image mounted over USB stays until the phone restarts; if it is
+            # missing, the DVT connection fails next and is reported as an error, never as success.
+            return {"ready": True, "message": "Using the developer image mounted over USB. After the iPhone restarts, connect it by USB once and choose Prepare."}
         async with await connection_lockdown(udid, autopair=True) as lockdown:
             if not lockdown.paired:
                 raise RuntimeError("Unlock the iPhone and trust this computer.")
@@ -179,6 +283,9 @@ class Bridge:
                 # A new lockdown connection after replug says nothing about the old
                 # DVT stream. Check its lifetime both before and after the USB probe.
                 session = self.session
+                if self.session_usable(session) and CONNECTION.get() in NETWORK_CONNECTIONS:
+                    # The live DVT channel is the only meaningful network liveness signal.
+                    return session
                 if self.session_usable(session):
                     try:
                         async with await connection_lockdown(udid):
@@ -213,7 +320,7 @@ class Bridge:
         return session
 
     def session_usable(self, session):
-        # _closed is pinned 11.12.4's immediate close flag; wait_disconnected()
+        # _closed is the pinned pymobiledevice3's immediate DTX close flag; wait_disconnected()
         # only completes after socket/channel cleanup, which can take seconds.
         return (self.session is session and session.get("valid", True) and
                 not getattr(getattr(session.get("dvt"), "dtx", None), "_closed", False) and
@@ -300,12 +407,19 @@ class Bridge:
 
     async def dispatch(self, method, params):
         connection = params.get("connection", "usb")
-        if connection not in ("usb", "wifi"):
-            raise ValueError("Choose USB or Wi-Fi.")
+        if connection not in ("usb", "wifi", "remote"):
+            raise ValueError("Choose USB, Wi-Fi or remote.")
+        host = None
+        if connection == "remote":
+            host = valid_remote_host(params.get("host"))
+            if host is None:
+                raise ValueError("Enter the iPhone's remote IP address (for example its Tailscale 100.x address).")
         token = CONNECTION.set(connection)
+        host_token = REMOTE_HOST.set(host)
         try:
             return await self._dispatch(method, params)
         finally:
+            REMOTE_HOST.reset(host_token)
             CONNECTION.reset(token)
 
     async def _dispatch(self, method, params):
@@ -316,8 +430,11 @@ class Bridge:
         # Discovery opens independent lockdown connections. It
         # must not pause the persistent DVT refresh loop behind slow trust probes.
         if method == "discover":
-            return await self.discover()
+            udid = params.get("udid")
+            return await self.discover(udid if isinstance(udid, str) else None)
         async with self.lock:
+            if method == "pair-remote":
+                return await self.pair_remote(params.get("udid"))
             if method == "enable-wifi":
                 return await self.enable_wifi(params.get("udid"))
             if method == "prepare":

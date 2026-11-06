@@ -404,6 +404,10 @@ dialog[open] { animation: rise .18s ease-out; }
 .route-stop-number { display: grid; place-items: center; width: 24px; height: 24px; flex: 0 0 auto; background: var(--fill); border-radius: 50%; font-size: 12px; }
 .route-plan-actions { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
 .route-provider { color: var(--secondary); font-size: 12px; line-height: 1.5; margin: 12px 0; }
+.route-speed { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; color: var(--secondary); font-size: 12px; }
+.route-speed input { width: 72px; min-height: 34px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 9px; background: rgba(255,255,255,.65); color: var(--text); font-size: 13px; }
+.route-speed input:focus { outline: 0; border-color: rgba(0,122,255,.55); box-shadow: 0 0 0 3px rgba(0,122,255,.12); }
+.button-row.wrap { flex-wrap: wrap; gap: 8px 10px; }
 .route-summary { margin: 17px 0; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.5); }
 .route-summary > div { display: flex; flex-direction: column; gap: 5px; }
 .route-summary strong { font-size: 21px; letter-spacing: -.5px; }
@@ -438,3 +442,45 @@ dialog[open] { animation: rise .18s ease-out; }
 .wifi-prompt > div { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 #wifi-manual { margin: 24px 0; }
 #wifi-manual summary { cursor: pointer; font-weight: 500; margin-bottom: 20px; }
+
+.connection-modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 4px 0 10px; }
+.connection-modes button { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.55); color: var(--text); text-align: left; cursor: pointer; }
+.connection-modes button strong { font-size: 13px; font-weight: 600; }
+.connection-modes button small { color: var(--secondary); font-size: 11.5px; line-height: 1.35; }
+.connection-modes button[aria-pressed="true"] { border-color: rgba(0,122,255,.65); box-shadow: 0 0 0 3px rgba(0,122,255,.12); }
+.connection-modes button:disabled { opacity: .5; cursor: not-allowed; }
+.connection-status { margin: 0 0 12px; font-size: 12.5px; font-weight: 550; }
+.setup-guide { margin: 10px 0; }
+.setup-guide > summary { cursor: pointer; font-size: 13px; font-weight: 600; padding: 6px 0; }
+.guide-intro { margin: 8px 0 10px; color: var(--secondary); font-size: 12.5px; line-height: 1.5; }
+.setup-checklist { list-style: none; counter-reset: step; margin: 0; padding: 0; display: grid; gap: 12px; }
+.setup-checklist > li { counter-increment: step; position: relative; padding-left: 34px; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; line-height: 1.5; }
+.setup-checklist > li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: rgba(0,0,0,.06); font-size: 11.5px; font-weight: 600; }
+.setup-checklist > li.done::before { content: "✓"; background: #1f9d55; color: #fff; }
+.setup-checklist > li > span { color: var(--secondary); }
+.setup-checklist > li > button, .setup-checklist .inline-form { align-self: flex-start; margin-top: 4px; }
+.inline-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.inline-form .text-input { width: 190px; min-height: 36px; }
+.guide-notes { margin: 12px 0 0; padding-left: 18px; color: var(--secondary); font-size: 12px; line-height: 1.55; display: grid; gap: 4px; }
+@media (max-width: 700px) { .connection-modes { grid-template-columns: 1fr; } }
+
+.field-hint { color: var(--secondary); font-size: 12px; }
+.tailscale-results { display: grid; gap: 6px; margin-top: 6px; max-width: 420px; }
+.tailscale-result { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.6); color: var(--text); text-align: left; cursor: pointer; }
+.tailscale-result > span:nth-child(2) { flex: 1; display: flex; flex-direction: column; }
+.tailscale-result small { color: var(--secondary); font-size: 11.5px; }
+.tailscale-result > span:last-child { color: #087bff; font-size: 12px; font-weight: 600; }
+.tailscale-result .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #b0b4ba; }
+.tailscale-result .status-dot.online { background: #1f9d55; }
+
+.url-box { padding: 7px 10px; border: 1px solid var(--line); border-radius: 9px; font-size: 12.5px; user-select: all; }
+.pair-code { font-size: 17px; font-weight: 700; letter-spacing: 1px; font-variant-numeric: tabular-nums; }
+.danger-text { color: #c4321c; }
+.error-text { color: #c4321c; }
+#phone-control-details { display: grid; gap: 10px; margin-top: 10px; }
+
+.qr-box { display: flex; gap: 14px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 14px; }
+.qr { width: 148px; height: 148px; flex: none; background: #fff; border-radius: 10px; padding: 4px; }
+.qr svg { width: 100%; height: 100%; display: block; }
+.qr-box > div:last-child { display: grid; gap: 4px; }
+.qr-box small { color: var(--secondary); font-size: 12px; line-height: 1.45; }

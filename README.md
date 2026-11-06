@@ -1,12 +1,13 @@
 # Ghost
 
-A small Electron app for setting a fixed phone location or following a road route over USB or Wi-Fi. Search for a
+A small Electron app for setting a fixed phone location or following a road route over USB, Wi-Fi, or
+(iPhone) remotely through Tailscale. Search for a
 place, drop a pin, or enter coordinates, then explicitly apply it to your selected
 phone. Windows and macOS share one interface and use the appropriate iPhone or
 Android adapter.
 
-Current version: **0.1.7**. See [CHANGELOG.md](CHANGELOG.md) for the onboarding,
-interface, Android cleanup, Windows packaging, recovery-record, and reconnection changes.
+Current version: **0.1.8** (pre-release). It adds remote iPhone connections, phone control from a
+browser, and offline maps and routing. See [CHANGELOG.md](CHANGELOG.md).
 
 ![Ghost following an example road route in Chicago](docs/images/ghost-route.png)
 
@@ -14,7 +15,8 @@ interface, Android cleanup, Windows packaging, recovery-record, and reconnection
 
 ## Download and install
 
-Get [Ghost 0.1.7 for Mac or Windows](https://github.com/Blueturboguy07/ghost-location/releases/tag/v0.1.7).
+Get the [Ghost 0.1.8 pre-release for Mac or Windows](https://github.com/icebergdeleted-blip/ghost-location/releases/tag/v0.1.8-remote).
+The last upstream release is [0.1.7](https://github.com/Blueturboguy07/ghost-location/releases/tag/v0.1.7).
 Follow the [setup guide](SETUP.md) for Mac → iPhone, Windows → iPhone, Mac → Android, or Windows → Android, or use [Publik's guided install](https://publikhq.com/ghost/install).
 
 The downloads include the phone runtimes. No programming tools or Ghost account are needed. These early releases are unsigned; the guide explains opening them and the limits of current device testing.
@@ -22,12 +24,17 @@ The downloads include the phone runtimes. No programming tools or Ghost account 
 ## Features
 
 
-- Road routes through up to 12 stops, 45 mph movement, one-second updates, Pause and Resume.
+- Road routes through up to 12 stops, adjustable speed (default 45 mph), one-second updates, Pause and Resume.
+- Route geometry and progress saved to disk, so a route can be resumed manually after Ghost restarts.
+- Optional offline map (local raster MBTiles or tile folder) and self-hosted Photon/OSRM endpoints; see [docs/offline-maps.md](docs/offline-maps.md).
 - Interactive map, manual place search, draggable pin, and latitude/longitude input.
 - First-run Mac/Windows and iPhone/Android survey with a checklist tailored to all four USB configurations.
 - Saved places and recent selections stored locally.
 - A one-click USB → Wi-Fi handoff keeps the current location and resumes routes. Ghost offers it after a working USB session when the computer has Wi-Fi. Android 11+ also supports cable-free pairing.
 - iPhone location simulation through a bundled pymobiledevice3 sidecar.
+- Remote iPhone connection through Tailscale after a one-time USB setup; see [Remote iPhone and phone control](#remote-iphone-and-phone-control).
+- Optional phone control: set or restore locations from your phone's browser over Tailscale ([docs/phone-control.md](docs/phone-control.md)).
+- Desktop alerts when a live location loses or regains its connection.
 - Android location simulation through bundled ADB and Appium Settings.
 - Ongoing fixed-location updates and same-phone reconnection while Ghost stays open.
 - Automatic stale recovery-record cleanup when a different usable USB phone appears.
@@ -73,6 +80,25 @@ cable, and approve the computer's RSA prompt. Ghost's explicit Prepare action
 installs Appium Settings, grants location access, and selects it as the mock-location
 provider. Follow any additional device-specific prompts. Some Windows phones need
 the manufacturer's ADB USB driver. No root is required by this approach.
+
+## Remote iPhone and phone control
+
+**Remote (iPhone, iOS 17.4+):** with Tailscale on the computer and the iPhone, plug the
+iPhone in once and choose **Set up remote access** on the Connection screen. Then use
+**Find with Tailscale** (or type the iPhone's `100.x` address), unplug, and choose **Remote**.
+Limits, measured on iOS 27.0.1:
+
+- The iPhone must be joined to a Wi-Fi network (any network). iOS refuses the connection on
+  cellular alone. Away from Wi-Fi, a personal hotspot from a second phone works.
+- The location lasts only while connected. If the connection drops, the iPhone returns to its
+  real location within about a minute. Ghost alerts you and keeps retrying.
+- After each iPhone restart, plug it in once and choose **Prepare**.
+
+**Phone control** (off by default, Settings › Phone control) serves a map page only on this
+computer's Tailscale address. Pair a phone with a QR code or 6-digit code, then search, pick a
+saved place, **Set location**, or **Restore**. The computer must stay awake with Ghost open. See
+[docs/phone-control.md](docs/phone-control.md) for setup and the safety model, and
+[docs/wifi-remote-findings.md](docs/wifi-remote-findings.md) for the hardware results.
 
 ## Session behavior
 
@@ -142,7 +168,9 @@ moves the selected phone to the first road point and begins playback.
 Ghost uses the open-source [OSRM](https://github.com/Project-OSRM/osrm-backend)
 routing service with OpenStreetMap roads. Pins snap to roads within 1 km; if no
 connected driving route exists, planning fails instead of drawing a straight line.
-The speed is fixed at **45 mph (20.1168 m/s)** along the full geometry, irrespective
+The default speed is **45 mph (20.1168 m/s)**. Change it with the **Speed** field
+(1–120 mph, m/s = mph × 0.44704). A change applies to a running route from its next
+one-second update. Speed is applied along the full geometry, irrespective
 of traffic or speed limits. Location commands run every second in the desktop
 backend, including while the window is minimized. The blue dot shows the last
 sent point, not an independently measured phone position. Android reuses Appium
@@ -155,19 +183,27 @@ you press Resume. Slow commands or scheduling stalls pause rather than building 
 backlog or jumping ahead. Timings depend on the operating system and connection latency;
 the app does not guarantee that every phone app consumes each fix.
 
-Route geometry and progress stay in memory. Restarting Ghost does not resume a
-route; it keeps the existing recovery record for Retry or Restore. Restore before
+Route geometry and progress are saved next to the settings file (`route.json`):
+on start, on pause, disconnect and arrival, and at most every five seconds while
+moving. After Ghost restarts, a route that belongs to the unresolved session's
+phone comes back **paused**. **Resume route** first re-sends the last journaled
+point, then continues. Nothing resumes automatically. Restore, or replacing the
+record with a different phone, deletes the saved route. Restore before
 editing an active route or changing phones.
 
 ## Maps, search, and privacy
 
 Search sends your submitted text to the configured Photon provider. Viewing the map
-requests tiles from OpenStreetMap. Device identifiers and saved/session coordinates
+requests tiles from OpenStreetMap unless an offline tile file or folder is selected
+in Settings → Map tiles. Photon and OSRM endpoints can point at self-hosted
+servers; plain HTTP is accepted only for this computer or a private LAN address. Device identifiers and saved/session coordinates
 stay in the local application settings file. Planning a route sends the chosen
 stop coordinates (without device identifiers) to the public OSRM service. Route
 playback itself makes no routing-service requests. Search is rate-limited and cached for
 the running app; there is no autocomplete, background geocoding, or offline tile
-download. Pin and coordinate selection remain available if search fails.
+download. Ghost never downloads tiles for offline use itself; see
+[docs/offline-maps.md](docs/offline-maps.md) to prepare your own. Pin and coordinate
+selection remain available if search or tiles fail.
 
 The default Photon public demo is appropriate only for moderate use and has no
 availability guarantee. Change the HTTPS Photon API endpoint in Settings for a
@@ -195,8 +231,8 @@ device runtimes. Release installers are unsigned. Signing/notarization credentia
 for a trusted macOS launch and a recognized Windows publisher.
 No publishing or repository upload is performed by these commands.
 
-For v0.1.7, a macOS arm64 build produces `Ghost-0.1.7-mac-arm64.dmg` and
-`Ghost-0.1.7-mac-arm64.zip` in `release/`.
+For v0.1.8, a macOS arm64 build produces `Ghost-0.1.8-mac-arm64.dmg` and
+`Ghost-0.1.8-mac-arm64.zip` in `release/`.
 
 ### Native CI builds
 
@@ -233,6 +269,13 @@ Node adapter, JSONL bridge loop, Python bridge, and pinned upstream location API
 It replaces only the USB/tunnel/DVT peer, then checks repeated acknowledgements,
 an in-place target update, concurrent discovery, and post-Restore silence.
 
+`npm run test:offline-tiles` launches Electron with a generated MBTiles file and the
+OpenStreetMap tile server blocked, and checks that the map draws only local tiles.
+
+`node scripts/persistence-probe.mjs` is a **manual hardware probe** that changes a real
+iPhone's location. It is not part of any automated check. See
+[docs/persistence-findings.md](docs/persistence-findings.md).
+
 `npm run test:native` launches Electron with isolated settings and exercises map
 search, live OSRM road planning, coordinates, saved-place create/rename/delete, setup, preferences, and a
 compact window. It performs read-only USB discovery but never invokes phone
@@ -260,4 +303,4 @@ before claiming all four connections are verified.
 
 GPL-3.0-or-later. See LICENSE and THIRD_PARTY_NOTICES.md.
 
-For wireless setup, see [the Wi-Fi guide](SETUP.md#connect-over-the-same-wi-fi-network-017). Wi-Fi support is implemented and covered by automated tests; physical phone validation is still needed.
+For wireless setup, see [the Wi-Fi guide](SETUP.md#connect-over-the-same-wi-fi-network-017). iPhone Wi-Fi and Remote were checked on one iPhone (iOS 27.0.1); Android Wi-Fi still needs physical phone validation.

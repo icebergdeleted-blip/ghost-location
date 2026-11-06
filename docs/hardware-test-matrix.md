@@ -40,6 +40,12 @@ target phone application, test date and operator.
     `reconnecting`, or `stopping`: Ghost keeps that session and does not silently
     switch phones. Reconnect the same phone and confirm its unresolved record is kept.
 
+22. Persistence (manual, see `docs/persistence-findings.md`): after the sidecar is
+    killed, the transport closed, or the cable unplugged, record what Maps shows at 1,
+    5 and 30 minutes, then confirm Restore by a fresh process clears it.
+23. Route restart: quit Ghost without restoring during a route, reopen. The route
+    is paused, Resume continues from saved progress, and nothing moves before Resume.
+
 Do not use a successful desktop command alone as the pass criterion for a target
 application. Android mock-location detection and iOS app behavior are application-specific.
 

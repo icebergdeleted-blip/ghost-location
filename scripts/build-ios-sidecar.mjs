@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { pinnedIosVersion } from './check-resources.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const venv = path.join(root, 'sidecar', '.venv');
@@ -27,6 +28,13 @@ if (!process.argv.includes('--skip-install')) {
     env: { ...process.env, ...(target === 'darwin-x64' ? { OPENSSL_STATIC: '1' } : {}) },
   });
 }
+// build-info.json must record the version actually bundled; check-resources compares it with the pin.
+const pinned = pinnedIosVersion(readFileSync(path.join(root, 'sidecar', 'requirements.txt'), 'utf8'));
+if (!pinned) throw new Error('sidecar/requirements.txt does not pin pymobiledevice3==<version>.');
+const installed = spawnSync(python, ['-c', 'import importlib.metadata as m; print(m.version("pymobiledevice3"))'], { encoding: 'utf8' });
+if (installed.status !== 0 || installed.stdout.trim() !== pinned) {
+  throw new Error(`The build venv has pymobiledevice3 ${installed.stdout.trim() || '(missing)'}, but ${pinned} is pinned. Run without --skip-install.`);
+}
 const dist = path.join(root, 'resources', 'ios', target);
 const work = path.join(root, 'sidecar', 'build', target);
 mkdirSync(work, { recursive: true });
@@ -49,6 +57,6 @@ if (!status?.ok || !status.result?.available) throw new Error(`Bundled sidecar r
 const lock = spawnSync(python, ['-m', 'pip', 'freeze'], { encoding: 'utf8' });
 writeFileSync(path.join(dist, 'build-dependencies.txt'), lock.stdout);
 const bridgeSha256 = createHash('sha256').update(readFileSync(path.join(root, 'sidecar', 'ios_bridge.py'))).digest('hex');
-writeFileSync(path.join(dist, 'build-info.json'), JSON.stringify({ target, pymobiledevice3: '11.12.4',
+writeFileSync(path.join(dist, 'build-info.json'), JSON.stringify({ target, pymobiledevice3: pinned,
   builtAt: new Date().toISOString(), protocolVersion: 1, bridgeSha256 }, null, 2));
 console.log(`Built and verified iPhone sidecar: ${executable}`);

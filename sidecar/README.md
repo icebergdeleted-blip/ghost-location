@@ -1,7 +1,8 @@
 # iPhone bridge
 
 The app communicates with `ios_bridge.py` over a private JSONL child-process pipe.
-The runtime pins pymobiledevice3 11.12.4 (GPL-3.0-or-later). The Python API was
+The runtime pins pymobiledevice3 11.50.0 (GPL-3.0-or-later); 11.12.4's RemotePairing
+proof is rejected by iOS 27. The Python API was
 checked against that published wheel, including its DVT acknowledgement and
 connection-disconnected event implementations.
 

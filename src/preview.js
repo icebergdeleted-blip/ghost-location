@@ -18,6 +18,8 @@ export function createPreviewBridge() {
       onboardingComplete: false,
       hostPlatform: null,
       phonePlatform: null,
+      routeSpeedMph: 45,
+      routingUrl: 'https://router.project-osrm.org/',
       ...read('ghost.preview.preferences', {}),
     },
     busy: false,
@@ -32,6 +34,9 @@ export function createPreviewBridge() {
     setConnection: desktopOnly,
     connectWifi: desktopOnly,
     prepareDevice: desktopOnly,
+    pairRemote: desktopOnly,
+    findTailscalePhones: desktopOnly,
+    phoneControl: desktopOnly,
     applyLocation: desktopOnly,
     stopLocation: desktopOnly,
     getRoute: async () => null,
@@ -40,6 +45,8 @@ export function createPreviewBridge() {
     pauseRoute: desktopOnly,
     resumeRoute: desktopOnly,
     installRuntime: desktopOnly,
+    getTileInfo: async () => ({ kind: 'online', error: null }),
+    chooseTileSource: desktopOnly,
     searchPlaces: async () => { throw new Error('Place search is available in the desktop app. In this preview, click the map or enter coordinates to choose a place.'); },
     savePlace: async (place) => {
       const saved = { ...place, id: place.id || crypto.randomUUID() };

@@ -6,12 +6,13 @@ GeoPort, or LocationSimulator is copied into this application.
 
 | Component | Version | Role | License / source |
 | --- | --- | --- | --- |
-| pymobiledevice3 | 11.12.4 | iPhone USB discovery, developer services, location simulation | GPL-3.0-or-later; https://github.com/doronz88/pymobiledevice3 |
+| pymobiledevice3 | 11.50.0 | iPhone USB discovery, developer services, location simulation | GPL-3.0-or-later; https://github.com/doronz88/pymobiledevice3 |
 | Appium Settings | 8.0.9 | Android mock-location helper APK | Apache-2.0; https://github.com/appium/io.appium.settings |
 | Android Platform Tools / ADB | See resources/adb/*/provenance.json | Android USB transport | Bundled NOTICE files; https://developer.android.com/tools/releases/platform-tools |
 | Electron | 44.3.0 | Desktop runtime | MIT and Chromium third-party notices; https://github.com/electron/electron |
 | Leaflet | 1.9.4 | Interactive map | BSD-2-Clause; https://github.com/Leaflet/Leaflet |
 | Lucide | See package-lock.json | Interface icons | ISC; https://github.com/lucide-icons/lucide |
+| qrcode-generator | 2.0.4 | Phone-control pairing QR code | MIT; https://github.com/kazuhikoarase/qrcode-generator |
 | Vite | 8.3.0 | Renderer build tooling | MIT; https://github.com/vitejs/vite |
 | electron-builder | 26.15.3 | Installer tooling | MIT; https://github.com/electron-userland/electron-builder |
 | PyInstaller | See sidecar/requirements-build.txt | Python runtime packaging | GPL with distribution exception; https://github.com/pyinstaller/pyinstaller |
