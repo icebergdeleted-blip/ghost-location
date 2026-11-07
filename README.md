@@ -1,5 +1,10 @@
 # Ghost
 
+> **This fork is archived.** Development continues at **[VeilX](https://github.com/icebergdeleted-blip/VeilX)**,
+> which is based on this work. Get the latest version from the
+> [VeilX releases](https://github.com/icebergdeleted-blip/VeilX/releases). The original project is
+> [Blueturboguy07/ghost-location](https://github.com/Blueturboguy07/ghost-location).
+
 A small Electron app for setting a fixed phone location or following a road route over USB, Wi-Fi, or
 (iPhone) remotely through Tailscale. Search for a
 place, drop a pin, or enter coordinates, then explicitly apply it to your selected
