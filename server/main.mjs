@@ -7,6 +7,7 @@
 //   node server/main.mjs pair     ask the running server for a 6-digit pairing code
 //   node server/main.mjs status   show the server's phone-control and session status
 //   node server/main.mjs revoke   sign out every paired phone
+//   node server/main.mjs help     list the iPhone setup commands (devices, prepare, setup-remote, …)
 import { createConnection, createServer } from 'node:net';
 import { chmod, mkdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -30,6 +31,20 @@ export function controlSocketPath(dataDir, platform = process.platform) {
 }
 
 const RETRY_MS = 15_000;
+const LONG_MS = 15 * 60_000; // Prepare may download the developer image first
+/** Admin commands and how long the CLI waits for each. */
+export const COMMANDS = {
+  pair: ['Show a 6-digit pairing code and QR link for the phone page.', 5000],
+  status: ['Phone control and current session.', 5000],
+  revoke: ['Sign out every paired phone.', 5000],
+  devices: ['List phones Ghost can see on the current connection.', 30_000],
+  connection: ['Show or choose the connection: usb, wifi or remote.', 60_000],
+  prepare: ['Prepare a phone (developer image). Usage: prepare [phone-id]', LONG_MS],
+  'setup-remote': ['One-time remote access setup for a USB iPhone. Usage: setup-remote [phone-id]', LONG_MS],
+  'find-iphones': ["List iPhones in this computer's Tailscale network.", 30_000],
+  'remote-address': ["Show or set the iPhone's Tailscale address. Usage: remote-address [100.x.y.z]", 5000],
+  restore: ["Restore the phone's real location now.", 120_000],
+};
 const BUSY_WAIT_MS = 30_000;
 
 /**
@@ -72,8 +87,51 @@ export class GhostServer {
     }
   }
 
-  /** Admin commands from the local `pair`/`status`/`revoke` CLI. */
-  async command(name) {
+  /** A phone by id, or the only phone on this connection when no id is given. */
+  pickDevice(id, filter = () => true) {
+    const devices = this.controller.state.devices.filter(filter);
+    if (id) {
+      const device = devices.find(item => item.id === id || item.serial === id);
+      if (!device) throw new Error(`No phone ${id} here. Run devices to see the list.`);
+      return device;
+    }
+    if (devices.length === 1) return devices[0];
+    throw new Error(devices.length ? 'More than one phone is connected. Add its id (see devices).'
+      : 'No phone found. Plug it in, unlock it, trust this computer, then run devices.');
+  }
+
+  /** Admin commands from the local CLI (see COMMANDS). */
+  async command(name, arg = '') {
+    const { controller } = this;
+    if (name === 'devices') {
+      await controller.scanDevices();
+      return { connection: controller.state.preferences.connection || 'usb',
+        devices: controller.state.devices.map(({ id, name: label, platform, connection, state, detail }) =>
+          ({ id, name: label, platform, connection, state, detail: detail || null })) };
+    }
+    if (name === 'connection') {
+      if (arg) await controller.setConnection(arg);
+      return { connection: controller.state.preferences.connection || 'usb' };
+    }
+    if (name === 'prepare') {
+      await controller.prepareDevice(this.pickDevice(arg).id);
+      return { prepared: true };
+    }
+    if (name === 'setup-remote') {
+      const device = this.pickDevice(arg, item => item.platform === 'ios' && item.connection === 'usb');
+      await controller.pairRemote(device.id);
+      return { remoteUdid: controller.state.preferences.remoteUdid, next: 'Set the address with remote-address, unplug, then run: connection remote' };
+    }
+    if (name === 'find-iphones') return { iphones: await controller.findTailscalePhones() };
+    if (name === 'remote-address') {
+      if (arg) await controller.updatePreferences({ remoteHost: arg }); // validated like the desktop field
+      return { remoteHost: controller.state.preferences.remoteHost || null, remoteUdid: controller.state.preferences.remoteUdid || null };
+    }
+    if (name === 'restore') {
+      if (!controller.state.session) return { restored: false, message: 'No phone location is being simulated.' };
+      await controller.stopLocation(); // throws if the clear command fails, so success is never claimed then
+      return { restored: !controller.state.session };
+    }
     if (name === 'pair') {
       const status = this.phoneControl.newPairingCode(); // throws if phone control is not on yet
       return { code: status.pairing.code, url: status.pairing.url, expiresAt: status.pairing.expiresAt };
@@ -84,7 +142,7 @@ export class GhostServer {
         session: session ? { deviceId: session.deviceId, status: session.status, connection: session.connection ?? null } : null };
     }
     if (name === 'revoke') return this.phoneControl.revokeAll();
-    throw new Error('Unknown command. Use pair, status or revoke.');
+    throw new Error(`Unknown command. Use one of: ${Object.keys(COMMANDS).join(', ')}.`);
   }
 
   async listenAdmin() {
@@ -99,12 +157,15 @@ export class GhostServer {
     const server = createServer(socket => {
       let input = '';
       socket.setEncoding('utf8');
-      socket.setTimeout(5000, () => socket.destroy());
+      socket.setTimeout(5000, () => socket.destroy()); // only until the request line arrives
       socket.on('data', chunk => {
+        if (input.includes('\n')) return;
         input += chunk;
         if (input.length > 256) return socket.destroy();
         if (!input.includes('\n')) return;
-        this.command(input.trim()).then(data => ({ ok: true, data }), error => ({ ok: false, error: error.message }))
+        socket.setTimeout(0); // Prepare can run for minutes
+        const [name, ...rest] = input.trim().split(/\s+/);
+        this.command(name, rest.join(' ')).then(data => ({ ok: true, data }), error => ({ ok: false, error: error.message }))
           .then(reply => socket.end(`${JSON.stringify(reply)}\n`));
       });
       socket.on('error', () => {});
@@ -147,7 +208,7 @@ export class GhostServer {
 }
 
 /** Sends one admin command to a running server. */
-export function requestAdmin(socketPath, name, timeoutMs = 5000) {
+export function requestAdmin(socketPath, name, timeoutMs = COMMANDS[name.split(' ')[0]]?.[1] ?? 5000) {
   return new Promise((resolve, reject) => {
     const socket = createConnection(socketPath);
     let output = '';
@@ -196,18 +257,30 @@ async function runServer() {
   await server.start();
 }
 
-async function runCommand(name) {
-  const data = await requestAdmin(controlSocketPath(dataDirectory()), name).catch(error => {
+function printHelp() {
+  console.log('Usage: node server/main.mjs [command]   (no command starts the server)\n');
+  for (const [name, [about]] of Object.entries(COMMANDS)) console.log(`  ${name.padEnd(15)} ${about}`);
+}
+
+async function runCommand(name, args) {
+  if (name === 'help' || name === '--help') return printHelp();
+  if (!COMMANDS[name]) { printHelp(); throw new Error(`Unknown command: ${name}`); }
+  if (['prepare', 'setup-remote'].includes(name)) console.log('Working… keep the phone unlocked. This can take a few minutes the first time.');
+  const data = await requestAdmin(controlSocketPath(dataDirectory()), [name, ...args].join(' ')).catch(error => {
     if (['ENOENT', 'ECONNREFUSED'].includes(error.code)) throw new Error('The Ghost server is not running (or uses another data folder; check GHOST_DATA_DIR).');
     throw error;
   });
   if (name === 'pair') {
     console.log(`Pairing code: ${data.code} (valid for 5 minutes, works once)`);
     console.log(`Or open this on your phone: ${data.url}`);
+  } else if (name === 'devices') {
+    console.log(`Connection: ${data.connection}`);
+    if (!data.devices.length) console.log('No phones found.');
+    for (const item of data.devices) console.log(`  ${item.id}  ${item.name} (${item.platform}, ${item.connection}) ${item.state}${item.detail ? ` – ${item.detail}` : ''}`);
   } else console.log(JSON.stringify(data, null, 2));
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const name = process.argv[2];
-  (name ? runCommand(name) : runServer()).catch(error => { console.error(error.message); process.exit(1); });
+  (name ? runCommand(name, process.argv.slice(3)) : runServer()).catch(error => { console.error(error.message); process.exit(1); });
 }

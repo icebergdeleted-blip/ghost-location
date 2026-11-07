@@ -5,7 +5,7 @@ import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { GhostServer, controlSocketPath, dataDirectory, requestAdmin } from '../server/main.mjs';
+import { COMMANDS, GhostServer, controlSocketPath, dataDirectory, requestAdmin } from '../server/main.mjs';
 
 const quiet = { info() {}, warn() {}, error() {} };
 
@@ -128,4 +128,82 @@ test('the local admin socket answers pair and status, and refuses a second serve
     await server.stop();
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+function setupController(devices) {
+  const controller = fakeController();
+  Object.assign(controller.state, { devices, preferences: { restoreOnQuit: true, connection: 'usb' } });
+  Object.assign(controller, {
+    async setConnection(value) { if (!['usb', 'wifi', 'remote'].includes(value)) throw new Error('Choose USB, Wi-Fi or remote.'); this.state.preferences.connection = value; },
+    async prepareDevice(id) { this.calls.push(['prepare', id]); },
+    async pairRemote(id) { this.calls.push(['pairRemote', id]); this.state.preferences.remoteUdid = id.slice(4); },
+    async updatePreferences(value) { this.state.preferences = { ...this.state.preferences, ...value }; },
+    async findTailscalePhones() { return [{ name: 'iPhone', ip: '100.123.126.110', online: true }]; },
+  });
+  return controller;
+}
+const iphone = { id: 'ios:UDID1', serial: 'UDID1', name: 'iPhone', platform: 'ios', connection: 'usb', state: 'ready' };
+const pixel = { id: 'android:P1', serial: 'P1', name: 'Pixel', platform: 'android', connection: 'usb', state: 'ready' };
+
+test('setup commands pick the only phone, or need an id when several are connected', async () => {
+  const one = setupController([iphone]);
+  const server = new GhostServer({ controller: one, phoneControl: fakePhoneControl(), log: quiet, ...manualTimers() });
+  await server.command('prepare');
+  assert.deepEqual(one.calls.at(-1), ['prepare', 'ios:UDID1']);
+  assert.equal((await server.command('devices')).devices[0].id, 'ios:UDID1');
+
+  const two = new GhostServer({ controller: setupController([iphone, pixel]), phoneControl: fakePhoneControl(), log: quiet, ...manualTimers() });
+  await assert.rejects(two.command('prepare'), /More than one phone/);
+  await two.command('prepare', 'P1');
+  await assert.rejects(two.command('prepare', 'nope'), /No phone nope/);
+  const none = new GhostServer({ controller: setupController([]), phoneControl: fakePhoneControl(), log: quiet, ...manualTimers() });
+  await assert.rejects(none.command('prepare'), /No phone found/);
+});
+
+test('remote setup needs a USB iPhone, then the address and connection are set from the CLI', async () => {
+  const controller = setupController([pixel, { ...iphone, connection: 'wifi' }]);
+  const server = new GhostServer({ controller, phoneControl: fakePhoneControl(), log: quiet, ...manualTimers() });
+  await assert.rejects(server.command('setup-remote'), /No phone found/); // Android and Wi-Fi iPhones are skipped
+  controller.state.devices = [pixel, iphone];
+  assert.equal((await server.command('setup-remote')).remoteUdid, 'UDID1');
+  assert.equal((await server.command('find-iphones')).iphones[0].ip, '100.123.126.110');
+  assert.equal((await server.command('remote-address', '100.123.126.110')).remoteHost, '100.123.126.110');
+  assert.equal((await server.command('connection', 'remote')).connection, 'remote');
+  await assert.rejects(server.command('connection', 'bluetooth'), /Choose USB, Wi-Fi or remote/);
+});
+
+test('restore from the CLI reports only what the clear command proved', async () => {
+  const idle = new GhostServer({ controller: fakeController(), phoneControl: fakePhoneControl(), log: quiet, ...manualTimers() });
+  assert.equal((await idle.command('restore')).restored, false);
+  const ok = new GhostServer({ controller: fakeController({ session: { deviceId: 'ios:A' } }), phoneControl: fakePhoneControl(), log: quiet, ...manualTimers() });
+  assert.equal((await ok.command('restore')).restored, true);
+  const failing = fakeController({ session: { deviceId: 'ios:A' }, stopFails: true });
+  const bad = new GhostServer({ controller: failing, phoneControl: fakePhoneControl(), log: quiet, ...manualTimers() });
+  await assert.rejects(bad.command('restore'), /not connected/);
+  assert.ok(failing.state.session, 'the session record stays when Restore fails');
+});
+
+test('admin requests carry arguments and long commands get long client timeouts', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'ghost-server-'));
+  const socketPath = controlSocketPath(dir);
+  const controller = setupController([iphone]);
+  const server = new GhostServer({ controller, phoneControl: fakePhoneControl(), log: quiet, socketPath, ...manualTimers() });
+  try {
+    await server.start();
+    assert.equal((await requestAdmin(socketPath, 'remote-address 100.123.126.110')).remoteHost, '100.123.126.110');
+    assert.equal((await requestAdmin(socketPath, 'connection wifi')).connection, 'wifi');
+  } finally {
+    await server.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+  assert.ok(COMMANDS.prepare[1] >= 10 * 60_000 && COMMANDS['setup-remote'][1] >= 10 * 60_000);
+});
+
+test('the systemd service lets Ghost restore before its iPhone helper is stopped', async () => {
+  const { readFileSync } = await import('node:fs');
+  const script = readFileSync(path.join(process.cwd(), 'scripts/linux/install-service.sh'), 'utf8');
+  assert.match(script, /^KillMode=mixed$/m); // SIGTERM to Ghost only; the helper must still be alive to send Restore
+  assert.match(script, /^TimeoutStopSec=(\d+)$/m);
+  assert.ok(Number(script.match(/^TimeoutStopSec=(\d+)$/m)[1]) >= 60);
+  assert.match(script, /^ExecStart=\$node \$ghost_dir\/server\/main\.mjs$/m);
 });
