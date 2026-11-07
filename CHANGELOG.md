@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Headless server (`npm run server`) for an always-on Linux host such as a Raspberry Pi 5.
+  The phone page is its interface; iPhone setup (devices, prepare, setup-remote,
+  remote-address, connection, restore) runs from a local command line over SSH. Includes a
+  systemd installer and `docs/raspberry-pi.md`.
+- Detect Linux Wi-Fi interfaces.
+
 ## 0.1.8 (pre-release)
 
 ### Remote iPhone connection and phone control

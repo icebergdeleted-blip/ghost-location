@@ -35,6 +35,7 @@ The downloads include the phone runtimes. No programming tools or Ghost account 
 - Remote iPhone connection through Tailscale after a one-time USB setup; see [Remote iPhone and phone control](#remote-iphone-and-phone-control).
 - Optional phone control: set or restore locations from your phone's browser over Tailscale ([docs/phone-control.md](docs/phone-control.md)).
 - Desktop alerts when a live location loses or regains its connection.
+- Headless server for an always-on Linux host such as a Raspberry Pi; see [docs/raspberry-pi.md](docs/raspberry-pi.md).
 - Android location simulation through bundled ADB and Appium Settings.
 - Ongoing fixed-location updates and same-phone reconnection while Ghost stays open.
 - Automatic stale recovery-record cleanup when a different usable USB phone appears.
