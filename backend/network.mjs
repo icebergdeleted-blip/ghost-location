@@ -1,8 +1,9 @@
 import {networkInterfaces} from 'node:os';
+import {readdir, stat} from 'node:fs/promises';
 import {run} from './process.mjs';
 
 // Only identify the active Wi-Fi interface; SSIDs and network passwords are not read.
-export async function wifiStatus({platform = process.platform, runner = run, interfaces = networkInterfaces} = {}) {
+export async function wifiStatus({platform = process.platform, runner = run, interfaces = networkInterfaces, wireless = linuxWirelessNames} = {}) {
   let names = [];
   if (platform === 'darwin') {
     const result = await runner('/usr/sbin/networksetup', ['-listallhardwareports'], {timeoutMs: 5000});
@@ -13,7 +14,17 @@ export async function wifiStatus({platform = process.platform, runner = run, int
     if (result.code !== 0 || !result.stdout.trim()) return {wifi: false};
     const parsed = JSON.parse(result.stdout.replace(/^\uFEFF/, ''));
     names = Array.isArray(parsed) ? parsed : [parsed];
+  } else if (platform === 'linux') {
+    names = await wireless();
   }
   const addresses = interfaces();
   return {wifi: names.some(name => addresses[name]?.some(ip => !ip.internal && !/^(?:169\.254\.|fe80:|127\.|::1$)/i.test(ip.address)))};
+}
+
+/** Linux marks Wi-Fi interfaces with a `wireless` directory in sysfs (e.g. wlan0 on a Raspberry Pi). */
+export async function linuxWirelessNames(root = '/sys/class/net') {
+  let names;
+  try { names = await readdir(root); } catch { return []; }
+  const checks = await Promise.all(names.map(name => stat(`${root}/${name}/wireless`).then(info => info.isDirectory(), () => false)));
+  return names.filter((_, index) => checks[index]);
 }

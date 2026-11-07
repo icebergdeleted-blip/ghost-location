@@ -9,6 +9,7 @@
   "main": "electron/main.mjs",
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "server": "node server/main.mjs",
     "preview": "vite --host 127.0.0.1",
     "build": "vite build",
     "start": "npm run build && electron .",
